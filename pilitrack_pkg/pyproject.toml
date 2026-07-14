@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pilitrack"
+version = "0.1.0"
+description = "Quantify type IV pili dynamics from labelled time-lapse microscopy"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "BSD-3-Clause" }
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "scikit-image>=0.22",
+    "pandas>=2.0",
+]
+
+[project.scripts]
+pilitrack-gui = "pilitrack.app:main"
+pilitrack-validate = "pilitrack.validate:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+io = ["nd2>=0.10", "tifffile>=2023.7"]  # read real ND2 (and TIFF) movies
+czi = ["czifile"]                       # read Zeiss CZI (or install aicsimageio)
+qc = ["matplotlib>=3.7"]                # QC overlay PNGs
+yaml = ["pyyaml"]                       # optional YAML config files
+# Optional detection backends (neither is a hard dependency):
+omnipose = ["omnipose"]        # deep-learning cell instance segmentation
+ilastik = ["h5py"]             # read ilastik headless probability exports
+viewer = ["napari[all]", "magicgui"]  # interactive curation viewer
+#   (ilastik itself is a standalone app from ilastik.org, not a pip package)
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

@@ -1,0 +1,22 @@
+# Large microscopy movies — too big for git (GitHub caps files at 100 MB).
+# Share the raw data separately, or use Git LFS if you want it versioned.
+*.nd2
+*.czi
+*.lif
+
+# Archives (the source of truth is pilitrack_pkg/)
+*.zip
+
+# Python build / cache
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Analysis output folders written by the runners
+pilitrack_out/
+pilitrack_batch/
