@@ -43,8 +43,24 @@ two-channel stack
 pip install -e .            # core (numpy, scipy, scikit-image, pandas)
 pip install -e ".[dev]"     # + pytest
 pip install -e ".[io,qc]"   # + nd2/tifffile reader and matplotlib QC (for real movies)
-pytest                      # 62 tests
+pytest                      # 96 tests
 python examples/run_synthetic.py
+```
+
+## Three ways to open it
+
+No terminal needed once installed &mdash; double-click a launcher in the project
+folder, or run a command:
+
+| Way | How | Best for |
+|---|---|---|
+| **Browser** | `pilitrack-web` &nbsp;·&nbsp; or double-click **Start pilitrack (browser)** | easiest; no Qt. Runs a small **local** server, opens in your browser, data stays on your machine. Pick/upload a movie, Analyze, view overlays, download CSVs. |
+| **Desktop** | `pilitrack-gui` &nbsp;·&nbsp; or **Start pilitrack (desktop)** | full **hand-labeling** (trace missed pili, paint cells) in a napari window. |
+| **Scripts / batch** | `pilitrack-batch`, `pilitrack-validate`, `examples/*.py` | folders of movies, validation, automation. |
+
+```bash
+pip install -e ".[web]"     # browser app (streamlit); [viewer] for the desktop app
+pilitrack-web               # -> opens http://localhost:8501 in your browser
 ```
 
 ## Configuration

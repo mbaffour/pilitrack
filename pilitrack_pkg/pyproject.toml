@@ -18,13 +18,16 @@ dependencies = [
 
 [project.scripts]
 pilitrack-gui = "pilitrack.app:main"
+pilitrack-batch = "pilitrack.batch:main"
 pilitrack-validate = "pilitrack.validate:main"
+pilitrack-web = "pilitrack.web_launch:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=7"]
 io = ["nd2>=0.10", "tifffile>=2023.7"]  # read real ND2 (and TIFF) movies
 czi = ["czifile"]                       # read Zeiss CZI (or install aicsimageio)
 qc = ["matplotlib>=3.7"]                # QC overlay PNGs
+web = ["streamlit>=1.30", "matplotlib>=3.7"]  # browser app (pilitrack-web)
 yaml = ["pyyaml"]                       # optional YAML config files
 # Optional detection backends (neither is a hard dependency):
 omnipose = ["omnipose"]        # deep-learning cell instance segmentation
