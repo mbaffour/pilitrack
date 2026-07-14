@@ -35,6 +35,18 @@ pip install -r requirements.txt
 pilitrack-web
 ```
 
+## Big movies (500 MB+)
+
+The tool never needs the whole movie in memory:
+
+- **In the browser app:** type the **File path** (don't use *…or upload*) — the
+  file stays on disk and only the part you're viewing is read. "Fast preview"
+  (on by default) loads just a centre crop of the first frames; the **Downsample**
+  slider (2× / 4×) shrinks the whole field to fit. (Uploads are also allowed up to
+  8 GB, but the path is lighter.)
+- **In scripts / desktop:** use `--fast`, or `--roi Y0 Y1 X0 X1` / `--frames S E`
+  to bound what's loaded.
+
 ## Optional add-ons
 
 - **Zeiss CZI movies:** `pip install czifile`

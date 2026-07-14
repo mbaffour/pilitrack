@@ -27,20 +27,37 @@ DEFAULT_MOVIE = str(Path(__file__).resolve().parents[3] / "Labelled data" / "tri
 
 def analyze_for_web(path, *, detect_threshold=None, fast=True, frames=None,
                     roi=None, pili_channel=None, cell_channel=None,
-                    model=None) -> dict:
+                    model=None, downsample=1) -> dict:
     """Load + analyze a movie for the web UI. Returns everything the page renders
     (fluor stack, cfg, detect_and_link art, summary, qc, meta). ``model`` (a
-    trained detector or path) replaces the ridge filter when given."""
+    trained detector or path) replaces the ridge filter when given.
+
+    Big movies are handled without loading the whole file: ND2 crops are read
+    **lazily** (only the ROI/frames are materialized), and ``downsample`` strides
+    the pixels (pixel size is rescaled to match), so a 500 MB movie stays light.
+    """
+    is_nd2 = isinstance(path, str) and path.lower().endswith(".nd2")
     if fast and roi is None:
-        _, _, m0 = load_movie(path, frames=slice(0, 1))
+        _, _, m0 = load_movie(path, frames=slice(0, 1), as_dask=is_nd2)
         H, W = m0["shape_yx"]
         c = 256
         y0, x0 = max(0, H // 2 - c), max(0, W // 2 - c)
         roi = (y0, y0 + 2 * c, x0, x0 + 2 * c)
         if frames is None:
             frames = slice(0, 15)
+    # lazily materialize just the crop for ND2 (avoids loading the full file)
     fluor, cell, meta = load_movie(path, pili_channel=pili_channel,
-                                   cell_channel=cell_channel, frames=frames, roi=roi)
+                                   cell_channel=cell_channel, frames=frames,
+                                   roi=roi, as_dask=(is_nd2 and roi is not None))
+    d = max(1, int(downsample))
+    if d > 1:
+        fluor = np.ascontiguousarray(fluor[:, ::d, ::d])
+        if cell is not None:
+            cell = np.ascontiguousarray(cell[:, ::d, ::d])
+        meta = dict(meta)
+        meta["shape_yx"] = (fluor.shape[1], fluor.shape[2])
+        if meta.get("pixel_size_nm"):
+            meta["pixel_size_nm"] = meta["pixel_size_nm"] * d
     overrides = {"detect_threshold": detect_threshold or DEFAULT_DETECT_THRESHOLD}
     cfg, detection = build_config(meta, overrides=overrides)
     seg, det = _backends(meta["single_channel"], detection)
@@ -139,6 +156,9 @@ def main():
         path = st.text_input("File path", value=default,
                              help="ND2 / TIFF / OME-TIFF / CZI on this computer")
         up = st.file_uploader("…or upload", type=["nd2", "tif", "tiff", "czi"])
+        st.caption("**Big movie?** Use the **File path** box above — the file stays "
+                   "on disk (no upload, no size limit) and only the part you view "
+                   "is loaded. Uploading copies the whole file into memory.")
         st.header("Detector")
         det_choice = st.radio(
             "Pilus detector",
@@ -155,7 +175,11 @@ def main():
         thr = st.slider("Detection threshold", 0.15, 0.60, 0.30, 0.05,
                         help="Higher = stricter (less noise, may miss faint pili)")
         fast = st.checkbox("Fast preview (center crop + first frames)", value=True,
-                          help="Uncheck for the whole movie — slower")
+                          help="Uncheck for the whole movie — slower and heavier")
+        ds = st.select_slider("Downsample (for big/whole-field views)",
+                              options=[1, 2, 4], value=1,
+                              help="2× or 4× shrinks pixels so the full field fits "
+                                   "in memory; pixel size is rescaled to match.")
         go = st.button("Analyze", type="primary", use_container_width=True)
 
     if go:
@@ -186,7 +210,7 @@ def main():
         with st.spinner("Analyzing… (first run also loads the movie)"):
             try:
                 st.session_state["res"] = analyze_for_web(
-                    src, detect_threshold=thr, fast=fast, model=model)
+                    src, detect_threshold=thr, fast=fast, model=model, downsample=ds)
             except Exception as exc:
                 st.exception(exc)
                 return

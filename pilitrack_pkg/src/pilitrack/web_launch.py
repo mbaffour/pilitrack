@@ -13,7 +13,10 @@ from pathlib import Path
 def main(argv=None):
     webapp = Path(__file__).with_name("webapp.py")
     cmd = [sys.executable, "-m", "streamlit", "run", str(webapp),
-           "--browser.gatherUsageStats", "false"]
+           "--browser.gatherUsageStats", "false",
+           # microscopy movies are large — lift Streamlit's 200 MB upload cap
+           "--server.maxUploadSize", "8192",
+           "--server.maxMessageSize", "8192"]
     extra = list(sys.argv[1:] if argv is None else argv)
     cmd += extra
     try:

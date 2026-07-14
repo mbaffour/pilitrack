@@ -72,3 +72,16 @@ def test_analyze_for_web_on_tiff(tmp_path):
     assert {"fluor", "cfg", "art", "res", "qc", "meta"} <= set(r)
     assert r["fluor"].shape[0] == 6
     assert "flags" in r["qc"]
+
+
+def test_analyze_for_web_downsample_halves_and_rescales(tmp_path):
+    tifffile = pytest.importorskip("tifffile")
+    mov = (np.random.default_rng(0).random((4, 160, 160)) * 800).astype(np.uint16)
+    p = tmp_path / "big.ome.tif"
+    tifffile.imwrite(str(p), mov, metadata={
+        "axes": "TYX", "PhysicalSizeX": 0.0433, "PhysicalSizeXUnit": "µm",
+        "TimeIncrement": 0.4})
+    r1 = analyze_for_web(str(p), fast=False, downsample=1)
+    r2 = analyze_for_web(str(p), fast=False, downsample=2)
+    assert r2["fluor"].shape[1] == r1["fluor"].shape[1] // 2       # strided
+    assert r2["cfg"].pixel_size_nm == pytest.approx(r1["cfg"].pixel_size_nm * 2)
