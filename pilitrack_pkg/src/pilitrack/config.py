@@ -39,6 +39,16 @@ class AcquisitionConfig:
     min_phase_frames: int = 2         # a phase must persist this many frames
     velocity_sign_eps_nm_s: float = 20.0  # |v| below this counts as a dwell
 
+    def __post_init__(self):
+        # dt_s and pixel_size_nm are divisors throughout (velocities, px<->nm,
+        # savgol delta). A zero/negative value would surface as an opaque
+        # ZeroDivisionError deep in the kinetics; fail early and clearly instead.
+        if not (self.dt_s > 0):
+            raise ValueError(f"dt_s must be > 0 (got {self.dt_s}); pass --dt or "
+                             "set the frame interval.")
+        if not (self.pixel_size_nm > 0):
+            raise ValueError(f"pixel_size_nm must be > 0 (got {self.pixel_size_nm}).")
+
     @property
     def min_pilus_length_px(self) -> float:
         return self.min_pilus_length_nm / self.pixel_size_nm

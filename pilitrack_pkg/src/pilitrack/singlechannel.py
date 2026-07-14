@@ -29,6 +29,17 @@ from skimage.morphology import disk, opening, skeletonize, white_tophat
 from .detect import _drop_small
 
 
+def _otsu_mask(work, open_radius_px: float) -> np.ndarray:
+    """Grey-open (disk) to erase thin pili, then Otsu-threshold. Returns an
+    all-False mask if Otsu can't split (a flat/near-constant image)."""
+    opened = opening(work, disk(int(round(open_radius_px))))
+    try:
+        thr = threshold_otsu(opened)
+    except ValueError:
+        return np.zeros(np.asarray(work).shape, dtype=bool)
+    return opened > thr
+
+
 def _cell_mask(
     frame,
     cfg,
@@ -62,7 +73,15 @@ def _cell_mask(
     if method == "robust":
         sigma = flatten_sigma or (2500.0 / float(cfg.pixel_size_nm))
         flat = np.clip(img - ndi.gaussian_filter(img, float(sigma)), 0, None)
-        work = np.minimum(flat, np.percentile(flat, float(winsor_percentile)))
+        cap = float(np.percentile(flat, float(winsor_percentile)))
+        mask = _otsu_mask(np.minimum(flat, cap), open_radius_px)
+        # Sparse fields: when cells cover less than (100 - winsor_percentile)% of
+        # the frame, the winsor cap sits at background and clips the cells away,
+        # giving an empty mask. Retry without winsorizing so a few bright cells
+        # are still recovered (dense fields keep the winsorized result).
+        if not mask.any():
+            mask = _otsu_mask(flat, open_radius_px)
+        return mask
     elif method == "log-otsu":
         floor = float(np.percentile(img, 1.0))
         work = np.log1p(np.clip(img - floor, 0, None))
@@ -70,12 +89,7 @@ def _cell_mask(
         work = img
     else:
         raise ValueError(f"unknown cell-mask method {method!r}")
-    opened = opening(work, disk(int(round(open_radius_px))))
-    try:
-        thr = threshold_otsu(opened)
-    except ValueError:
-        return np.zeros(img.shape, dtype=bool)
-    return opened > thr
+    return _otsu_mask(work, open_radius_px)
 
 
 def make_cell_segmenter(
@@ -144,7 +158,9 @@ def make_pili_detector(
     Threshold, skeletonize, drop-small — same contract as ``detect.detect_pili``.
     """
     tophat_fp = disk(int(round(tophat_radius_px)))
-    erode_fp = disk(int(round(erosion_radius_px)))
+    # clamp to >=1: disk(0) is a 1x1 element, which makes the interior erosion a
+    # no-op and zeroes the whole cell (incl. the rim where the pilus base sits).
+    erode_fp = disk(max(1, int(round(erosion_radius_px))))
 
     def detect_fn(frame, cfg) -> np.ndarray:
         img = np.asarray(frame, dtype=np.float32)

@@ -42,18 +42,63 @@ def _endpoints(coords: np.ndarray) -> list[tuple]:
     return ends
 
 
-def _geodesic_length_px(coords: np.ndarray) -> float:
-    """Approximate path length: sum of nearest-neighbour steps along skeleton.
+def _order_skeleton(coords: np.ndarray):
+    """Order skeleton pixels into a single path from an endpoint.
 
-    Uses a minimum spanning path proxy -- for near-linear pilus skeletons the
-    step sum (1 for orthogonal, sqrt2 for diagonal neighbours) is accurate.
+    Returns an ordered ``(k, 2)`` float array, or ``None`` if the skeleton
+    branches (a pixel with more than one unvisited neighbour) or does not form
+    one connected path — those fall back to the plain step sum.
+    """
+    s = set(map(tuple, coords))
+    if len(s) < 2:
+        return None
+    ends = _endpoints(coords)
+    start = ends[0] if ends else tuple(coords[0])
+    order = [start]
+    seen = {start}
+    cur = start
+    while True:
+        nbrs = [(cur[0] + dy, cur[1] + dx)
+                for dy in (-1, 0, 1) for dx in (-1, 0, 1)
+                if not (dy == 0 and dx == 0)
+                and (cur[0] + dy, cur[1] + dx) in s
+                and (cur[0] + dy, cur[1] + dx) not in seen]
+        if not nbrs:
+            break
+        if len(nbrs) > 1:          # branch point -> not a simple path
+            return None
+        cur = nbrs[0]
+        seen.add(cur)
+        order.append(cur)
+    if len(seen) != len(s):        # didn't cover every pixel (branch/disconnect)
+        return None
+    return np.asarray(order, dtype=float)
+
+
+def _geodesic_length_px(coords: np.ndarray) -> float:
+    """Sub-pixel-corrected path length of a skeleton, in pixels.
+
+    For a simple (unbranched) path we use the Vossepoel-Smeulders corrected
+    chain-code estimator ``L = 0.980*N_e + 1.406*N_o - 0.091*N_c`` (orthogonal,
+    diagonal, and corner counts). It cuts the naive ``1/sqrt2`` step-sum's ~8%
+    oblique-angle length overestimate — which biased every reported length and
+    velocity — to under ~2%. Branched skeletons (rare; filament crossings) fall
+    back to the plain nearest-neighbour step sum.
     """
     s = set(map(tuple, coords))
     if len(s) <= 1:
         return 0.0
+    ordered = _order_skeleton(coords)
+    if ordered is not None and len(ordered) >= 2:
+        d = np.diff(ordered, axis=0)
+        ne = int(np.sum(np.abs(d[:, 0]) + np.abs(d[:, 1]) == 1))
+        no = int(len(d) - ne)
+        dirs = np.sign(d).astype(int)
+        nc = int(np.sum(np.any(dirs[1:] != dirs[:-1], axis=1))) if len(d) > 1 else 0
+        return max(0.0, 0.980 * ne + 1.406 * no - 0.091 * nc)
+    # branched / disconnected skeleton: plain nearest-neighbour step sum
     total = 0.0
     seen = set()
-    # walk from an endpoint if one exists, else arbitrary
     ends = _endpoints(coords)
     start = ends[0] if ends else tuple(coords[0])
     stack = [start]

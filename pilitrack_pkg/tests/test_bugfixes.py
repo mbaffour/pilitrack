@@ -44,6 +44,50 @@ def test_build_config_ignores_loader_only_overrides():
     assert cfg.pixel_size_nm == 50.0            # real config override still applied
 
 
+def test_detect_pili_robust_to_a_hot_pixel():
+    """A single saturated pixel must not blank the whole frame (percentile
+    normalization, not global-max)."""
+    import numpy as np
+    from skimage.draw import line
+    from pilitrack.detect import detect_pili, filament_components
+    cfg = AcquisitionConfig(dt_s=0.4, pixel_size_nm=65.0)
+    frame = np.full((64, 64), 100.0)
+    rr, cc = line(10, 8, 40, 30)               # a faint diagonal pilus
+    frame[rr, cc] = 400.0
+    clean = detect_pili(frame, cfg)
+    frame[5, 55] = 60000.0                      # one hot/saturated pixel
+    withhot = detect_pili(frame, cfg)
+    _, n_clean = filament_components(clean)
+    _, n_hot = filament_components(withhot)
+    assert n_clean >= 1                         # pilus found without the hot pixel
+    assert n_hot >= 1                           # and still found WITH it (was 0 before)
+
+
+def test_geodesic_length_corrected_for_oblique_lines():
+    """The corrected estimator must be within ~3% of true length on an oblique
+    straight skeleton (the naive 1/sqrt2 sum overestimated by ~8%)."""
+    import numpy as np
+    from skimage.draw import line
+    from skimage.morphology import skeletonize
+    from pilitrack.measure import _geodesic_length_px
+    # ~22 deg line, the worst case for the naive estimator
+    y1, x1 = 20, 50
+    img = np.zeros((y1 + 3, x1 + 3), bool)
+    rr, cc = line(0, 0, y1, x1)
+    img[rr, cc] = True
+    L = _geodesic_length_px(np.argwhere(skeletonize(img)))
+    true = np.hypot(y1, x1)
+    assert abs(L - true) / true < 0.03
+
+
+def test_config_rejects_zero_dt_and_pixel_size():
+    import pytest
+    with pytest.raises(ValueError):
+        AcquisitionConfig(dt_s=0.0)
+    with pytest.raises(ValueError):
+        AcquisitionConfig(pixel_size_nm=0.0)
+
+
 def test_velocities_never_negative_on_noisy_traces():
     """summarize_pilus must never report a negative extension/retraction speed,
     even on noisy random-walk length traces (the merge/reclassify fix)."""

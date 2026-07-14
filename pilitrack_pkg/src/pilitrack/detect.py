@@ -54,14 +54,22 @@ def skeletonize_probability(prob: np.ndarray, cfg: AcquisitionConfig) -> np.ndar
 def detect_pili(fluor_frame: np.ndarray, cfg: AcquisitionConfig) -> np.ndarray:
     """Return a boolean skeleton mask of pilus filaments for one frame.
 
-    Sato tubeness enhances thin bright ridges; threshold relative to the
-    response max; skeletonize to 1-px centrelines.
+    Sato tubeness enhances thin bright ridges; threshold relative to a robust
+    high percentile of the response; skeletonize to 1-px centrelines.
     """
     img = fluor_frame.astype(float)
     ridge = sato(img, sigmas=cfg.ridge_sigmas, black_ridges=False)
-    if ridge.max() <= 0:
+    pos = ridge[ridge > 0]
+    if pos.size == 0:
         return np.zeros_like(img, dtype=bool)
-    ridge = ridge / ridge.max()
+    # Normalize by a high percentile of the positive response, NOT the global
+    # max: one hot/saturated pixel (or a cosmic ray) gives a huge Sato response
+    # that would rescale every real pilus below the fixed threshold and blank the
+    # whole frame. The 99.5th percentile is robust to such single-pixel outliers.
+    hi = np.percentile(pos, 99.5)
+    if hi <= 0:
+        hi = float(ridge.max())
+    ridge = np.clip(ridge / hi, 0, 1)
     mask = ridge > cfg.detect_threshold
     mask = _drop_small(mask, 3)
     return skeletonize(mask)
