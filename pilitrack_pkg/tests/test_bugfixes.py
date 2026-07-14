@@ -88,6 +88,41 @@ def test_config_rejects_zero_dt_and_pixel_size():
         AcquisitionConfig(pixel_size_nm=0.0)
 
 
+def test_saturation_level_detects_sub_full_range_clipping():
+    """A 12-bit camera in a uint16 container clips at 4095, not 65535."""
+    import numpy as np
+    from pilitrack.qc import _saturation_level
+    stack = np.full((3, 16, 16), 500, np.uint16)
+    stack[:, :8, :8] = 4095                     # a clipped block, not 65535
+    lvl = _saturation_level(stack)
+    assert lvl == 4095.0
+    assert np.mean(stack >= lvl) > 0.2          # saturation is now detectable
+
+
+def test_ml_scaled_sigmas_matches_physical_scale():
+    from pilitrack.ml import _scaled_sigmas
+    model = {"sigmas": (1.0, 2.0, 4.0), "pixel_size_nm": 130.0}
+    # target movie at 65 nm/px -> half the pixel size -> double the sigmas
+    assert _scaled_sigmas(model, 65.0) == (2.0, 4.0, 8.0)
+    assert _scaled_sigmas(model, 130.0) == (1.0, 2.0, 4.0)   # same scale -> unchanged
+    assert _scaled_sigmas({"sigmas": (1.0, 2.0)}, 65.0) == (1.0, 2.0)  # no train px
+
+
+def test_link_tracks_honors_manual_track_id():
+    """Two filaments hand-tagged with the same track_id must group into ONE
+    track even when their bases are farther apart than max_base_jump_px."""
+    import numpy as np
+    from pilitrack.measure import Filament
+    from pilitrack.track import link_tracks
+    cfg = AcquisitionConfig(dt_s=0.4, pixel_size_nm=65.0, max_base_jump_px=3.0)
+    co = np.array([[0, 0]])
+    f0 = Filament(1, 5.0, (10.0, 10.0), (10.0, 15.0), co, cell_id=1, track_id=7)
+    f1 = Filament(2, 6.0, (40.0, 40.0), (40.0, 46.0), co, cell_id=1, track_id=7)  # far base
+    tracks = link_tracks([[f0], [f1]], cfg)
+    grouped = [tr for tr in tracks if tr.track_id == 7]
+    assert len(grouped) == 1 and grouped[0].frames == [0, 1]
+
+
 def test_velocities_never_negative_on_noisy_traces():
     """summarize_pilus must never report a negative extension/retraction speed,
     even on noisy random-walk length traces (the merge/reclassify fix)."""

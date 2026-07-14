@@ -37,10 +37,53 @@ def link_tracks(per_frame_filaments: list, cfg: AcquisitionConfig) -> list[Track
     or ``"lap"`` — a globally optimal one-to-one Hungarian assignment that is
     more robust when several pili are close together or cross (greedy can grab
     the wrong nearby base first).
+
+    Filaments that already carry a ``track_id`` (a hand annotation grouping the
+    same pilus across frames, e.g. across a large base excursion the automatic
+    linker would split) are honored: they are grouped directly into their manual
+    track and only the remaining filaments go through the automatic linker.
     """
-    if getattr(cfg, "linker", "greedy") == "lap":
-        return _link_lap(per_frame_filaments, cfg)
-    return _link_greedy(per_frame_filaments, cfg)
+    manual: dict[int, list] = {}
+    auto = [[] for _ in per_frame_filaments]
+    for t, filaments in enumerate(per_frame_filaments):
+        for f in filaments:
+            mid = getattr(f, "track_id", None)
+            if mid is not None:
+                manual.setdefault(int(mid), []).append((t, f))
+            else:
+                auto[t].append(f)
+
+    linker = _link_lap if getattr(cfg, "linker", "greedy") == "lap" else _link_greedy
+    if not manual:
+        return linker(per_frame_filaments, cfg)
+
+    # auto-link the rest, then renumber so auto ids can't collide with manual ids
+    auto_tracks = linker(auto, cfg)
+    offset = max(manual) + 1
+    remap = {}
+    for tr in auto_tracks:
+        remap[tr.track_id] = tr.track_id + offset
+        tr.track_id += offset
+    for fils in auto:
+        for f in fils:
+            if f.track_id in remap:
+                f.track_id = remap[f.track_id]
+    manual_tracks = [_track_from_filaments(mid, grp) for mid, grp in manual.items()]
+    return manual_tracks + auto_tracks
+
+
+def _track_from_filaments(track_id: int, frame_fils: list) -> "Track":
+    """Build one Track from hand-grouped ``(frame, filament)`` pairs."""
+    frame_fils = sorted(frame_fils, key=lambda tf: tf[0])
+    cell_id = next((f.cell_id for _, f in frame_fils if f.cell_id is not None), None)
+    tr = Track(track_id, cell_id,
+               [t for t, _ in frame_fils],
+               [f.length_px for _, f in frame_fils],
+               [f.tip_yx for _, f in frame_fils],
+               frame_fils[-1][1].base_yx)
+    for _, f in frame_fils:
+        f.track_id = track_id
+    return tr
 
 
 def _link_greedy(per_frame_filaments: list, cfg: AcquisitionConfig) -> list[Track]:

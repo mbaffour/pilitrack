@@ -70,7 +70,8 @@ def analyze_for_web(path, *, detect_threshold=None, fast=True, frames=None,
     prob = None
     if model is not None:
         from pilitrack import ml
-        prob = ml.predict_prob_stack(ml.resolve_model(model), fluor)
+        prob = ml.predict_prob_stack(ml.resolve_model(model), fluor,
+                                     pixel_size_nm=cfg.pixel_size_nm)
     art = detect_and_link(fluor, fluor if meta["single_channel"] else cell, cfg,
                           segment_fn=seg,
                           detect_fn=(None if prob is not None else det),

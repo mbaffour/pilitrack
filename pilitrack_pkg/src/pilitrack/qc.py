@@ -21,10 +21,15 @@ IMPLAUSIBLE_VELOCITY_NM_S = 2000.0 # a single event faster than ~2 um/s
 
 
 def _saturation_level(stack) -> float:
-    """Value at which this stack is 'saturated'."""
-    if np.issubdtype(stack.dtype, np.integer):
-        return float(np.iinfo(stack.dtype).max)
-    return float(np.percentile(stack, 99.99))
+    """Value at which this stack is 'saturated' (clipped).
+
+    Real cameras clip at their bit depth — a 12-bit sCMOS stored in a uint16
+    container clips at 4095, not 65535 — so keying off the *dtype* max
+    (``np.iinfo(...).max``) never fires for sub-full-range data. Use the
+    brightest value actually present instead: on a genuinely clipped movie many
+    pixels pile up at that value (``saturated_fraction`` is high), while on a
+    clean movie only the single brightest pixel matches (fraction ~= 0)."""
+    return float(np.max(stack)) if stack.size else 0.0
 
 
 def _focus_score(frame) -> float:

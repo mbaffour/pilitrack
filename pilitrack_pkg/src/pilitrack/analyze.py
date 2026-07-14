@@ -142,7 +142,8 @@ def analyze_file(
         from . import ml
         if verbose:
             print("  detector              = trained ML model")
-        prob = ml.predict_prob_stack(ml.resolve_model(model), fluor)
+        prob = ml.predict_prob_stack(ml.resolve_model(model), fluor,
+                                     pixel_size_nm=cfg.pixel_size_nm)
     detection["detector"] = "ml" if prob is not None else "ridge"
 
     art = detect_and_link(fluor, cell_stack, cfg, segment_fn=segment_fn,

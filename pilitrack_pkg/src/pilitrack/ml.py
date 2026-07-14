@@ -116,19 +116,43 @@ def train_pilus_detector(images, masks, *, sigmas=DEFAULT_SIGMAS,
             "feature_names": feature_names(sigmas), "n_train": int(X.shape[0])}
 
 
-def predict_prob(model, image) -> np.ndarray:
-    """Per-pixel pilus probability ``(H, W)`` in [0, 1]."""
-    F = feature_stack(image, model["sigmas"])
+def _scaled_sigmas(model, pixel_size_nm):
+    """Scale the model's feature sigmas so they probe the same *physical* scale
+    on a movie whose pixel size differs from training. The feature COUNT is
+    unchanged (only the sigma values), so the classifier input still lines up."""
+    base = tuple(model["sigmas"])
+    train_px = model.get("pixel_size_nm")
+    if not train_px or not pixel_size_nm or pixel_size_nm <= 0:
+        return base
+    factor = float(train_px) / float(pixel_size_nm)
+    if abs(factor - 1.0) < 0.05:
+        return base
+    return tuple(max(0.5, s * factor) for s in base)
+
+
+def predict_prob(model, image, pixel_size_nm=None) -> np.ndarray:
+    """Per-pixel pilus probability ``(H, W)`` in [0, 1]. Pass ``pixel_size_nm``
+    to rescale the features to the training scale when it differs."""
+    F = feature_stack(image, _scaled_sigmas(model, pixel_size_nm))
     H, W, Fd = F.shape
-    p = model["clf"].predict_proba(F.reshape(-1, Fd))[:, 1]
+    clf = model["clf"]
+    proba = clf.predict_proba(F.reshape(-1, Fd))
+    # select the positive-class column robustly: a forest trained on a single
+    # class returns a 1-column proba, so a hardcoded [:, 1] would IndexError.
+    classes = list(getattr(clf, "classes_", []))
+    if 1 in classes:
+        p = proba[:, classes.index(1)]
+    else:
+        p = np.zeros(proba.shape[0], dtype=np.float32)
     return p.reshape(H, W).astype(np.float32)
 
 
-def predict_prob_stack(model, stack) -> np.ndarray:
+def predict_prob_stack(model, stack, pixel_size_nm=None) -> np.ndarray:
     """Probability map for a whole ``(T, Y, X)`` stack -> feeds
     ``analyze_movie(..., pilus_prob_stack=...)``."""
     stack = np.asarray(stack)
-    return np.stack([predict_prob(model, stack[t]) for t in range(stack.shape[0])])
+    return np.stack([predict_prob(model, stack[t], pixel_size_nm)
+                     for t in range(stack.shape[0])])
 
 
 # --------------------------------------------------------------------------- #
@@ -152,6 +176,18 @@ def train_from_dataset(root, *, target="pili", **kw):
     model = train_pilus_detector(images, masks, **kw)
     model["target"] = target
     model["n_frames"] = int(len(df))
+    # Record the training pixel size so predict_prob can rescale features for a
+    # movie at a different scale. The features use fixed pixel sigmas, so mixing
+    # bundles of very different pixel sizes blurs the model — warn if so.
+    pxs = [float(v) for v in df.get("pixel_size_nm", []) if v and float(v) > 0]
+    if pxs:
+        model["pixel_size_nm"] = float(np.median(pxs))
+        if max(pxs) / min(pxs) > 1.1:
+            import warnings
+            warnings.warn(
+                f"training bundles span pixel sizes {min(pxs):.1f}-{max(pxs):.1f} "
+                "nm/px; features are computed at fixed pixel sigmas, so mixing "
+                "scales may blur the model — prefer one pixel size per model.")
     return model
 
 
