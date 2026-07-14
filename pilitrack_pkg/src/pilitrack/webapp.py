@@ -267,6 +267,17 @@ def main():
     for f in qc["flags"]:
         st.warning("⚠ " + f)
 
+    T = art["n_frames"]
+    Hs, Ws = fluor.shape[1], fluor.shape[2]
+    st.caption(f"Loaded **{T}** frame{'s' if T != 1 else ''} · {Hs}×{Ws} px · "
+               f"{cfg.pixel_size_nm:.1f} nm/px · dt {cfg.dt_s:.3f} s")
+    if T == 1:
+        st.warning("Only **1 frame** was loaded — length is measurable, but "
+                   "extension/retraction velocities and tracking need a "
+                   "time-lapse. If your movie really has many frames, uncheck "
+                   "**Fast preview**, or its time axis may be stored unusually "
+                   "(e.g. as Z) — tell me the file format and I'll adjust.")
+
     t_over, t_label, t_fig, t_data = st.tabs(
         ["Frames", "Label (draw)", "Distributions", "Data & downloads"])
 

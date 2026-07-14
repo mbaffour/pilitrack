@@ -65,15 +65,21 @@ def _to_txy(arr, sizes: dict, channel: int = 0, z: int = 0) -> np.ndarray:
     if "Y" not in axes or "X" not in axes:
         raise ValueError(f"ND2 sizes {axes} lack Y/X image axes")
 
+    # A lone stack axis with no time axis is the time series (see _to_tcyx):
+    # keep Z as the frames instead of picking a single plane.
+    z_as_time = ("Z" in axes) and ("T" not in axes)
+
     index: list = [slice(None)] * arr.ndim
     for i, ax in enumerate(axes):
         if ax == "C":
             index[i] = int(channel)
-        elif ax == "Z":
+        elif ax == "Z" and not z_as_time:
             index[i] = int(z)
     sub = arr[tuple(index)]
 
-    remaining = [ax for ax in axes if ax not in ("C", "Z")]
+    dropped = ("C",) if z_as_time else ("C", "Z")
+    remaining = [("T" if (ax == "Z" and z_as_time) else ax)
+                 for ax in axes if ax not in dropped]
     unexpected = set(remaining) - {"T", "Y", "X"}
     if unexpected:
         raise ValueError(f"unsupported ND2 axes {sorted(unexpected)}")
@@ -336,6 +342,14 @@ def _to_tcyx(arr, sizes: dict, z="max", position: int = 0) -> np.ndarray:
             index[i] = int(position) if arr.shape[i] > position else 0
     arr = arr[tuple(index)]
     axes = [ax for ax in axes if ax not in _POSITION_AXES]
+
+    # A lone stack axis with no explicit time axis IS the time series here:
+    # TIRF pili imaging is single-plane, and plain multi-page TIFFs / ImageJ
+    # stacks saved with slices=N (frames=1) report their frames on Z. Treat that
+    # Z as T instead of max-projecting every frame into one. Genuine 3-D
+    # time-lapses (T *and* Z present) still get Z projected below.
+    if "Z" in axes and "T" not in axes:
+        axes[axes.index("Z")] = "T"
 
     # collapse Z
     if "Z" in axes:

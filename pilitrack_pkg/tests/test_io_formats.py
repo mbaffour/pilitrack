@@ -28,6 +28,15 @@ def test_to_tcyx_projects_z():
     assert (out == 9).all()
 
 
+def test_to_tcyx_lone_z_is_time():
+    # frames on Z with no T axis (plain multi-page/ImageJ stack) must stay as
+    # time, NOT be max-projected into a single frame.
+    out = _to_tcyx(np.zeros((7, 8, 8)), {"Z": 7, "Y": 8, "X": 8})
+    assert out.shape == (7, 1, 8, 8)
+    out2 = _to_tcyx(np.zeros((7, 2, 8, 8)), {"Z": 7, "C": 2, "Y": 8, "X": 8})
+    assert out2.shape == (7, 2, 8, 8)
+
+
 def test_to_tcyx_selects_position():
     a = np.zeros((2, 3, 6, 6))  # P, T, Y, X
     a[1] = 5

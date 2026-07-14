@@ -44,6 +44,12 @@ def test_to_txy_handles_z_plane():
     assert np.array_equal(out, d[:, 1])
 
 
+def test_to_txy_lone_z_is_time():
+    # a Z stack with no T axis is the time series, not planes to index into
+    out = _to_txy(np.arange(6 * 4 * 4).reshape(6, 4, 4), {"Z": 6, "Y": 4, "X": 4})
+    assert out.shape == (6, 4, 4)
+
+
 def test_to_txy_rejects_unknown_axis():
     with pytest.raises(ValueError):
         _to_txy(np.zeros((2, 2, 2)), {"P": 2, "Y": 2, "X": 2})
