@@ -96,14 +96,24 @@ def summarize(
     pilus_rows = []
     for tr in tracks:
         series_nm = tr.length_series(n_frames) * cfg.pixel_size_nm
-        valid = series_nm[~np.isnan(series_nm)]
-        if valid.size < 2:
+        finite = np.where(~np.isnan(series_nm))[0]
+        if finite.size < 2:
             continue
-        summ = summarize_pilus(valid, cfg)
+        # Take the span from first to last detection and interpolate any interior
+        # gap frames (tracks may bridge up to cfg.max_gap_frames). Feeding the
+        # gap-collapsed array to the kinetics would shrink a 2*dt interval to dt
+        # and overreport that segment's velocity ~2x; the interpolated span keeps
+        # the time axis uniform so velocities/phase durations stay correct.
+        span = series_nm[finite[0]:finite[-1] + 1].copy()
+        gap = np.isnan(span)
+        if gap.any():
+            idx = np.arange(span.size)
+            span[gap] = np.interp(idx[gap], idx[~gap], span[~gap])
+        summ = summarize_pilus(span, cfg)
         pilus_rows.append({
             "track_id": tr.track_id,
             "cell_id": tr.cell_id,
-            "n_frames": valid.size,
+            "n_frames": int(finite.size),
             "max_length_nm": summ["max_length_nm"],
             "n_extension_events": summ["n_extension_events"],
             "n_retraction_events": summ["n_retraction_events"],

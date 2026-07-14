@@ -67,9 +67,14 @@ def qc_metrics(stack, art: dict, res: dict, cfg) -> dict:
                     & (pili["max_length_nm"] >= cfg.min_pilus_length_nm)
                     & pili["cell_id"].notna()]
         n_qualified = int(len(qual))
-        med_ext = _nanmed(pili["mean_extension_velocity_nm_s"])
-        med_ret = _nanmed(pili["mean_retraction_velocity_nm_s"])
-        med_len = _nanmed(pili["max_length_nm"])
+        # report medians over the QUALIFIED pili — the report attributes them to
+        # "N qualified pili", so computing over the full (noisy, unfiltered) set
+        # would misrepresent them. Fall back to the full set only if nothing
+        # qualified, so a movie with detections still shows a ballpark number.
+        stat_src = qual if n_qualified > 0 else pili
+        med_ext = _nanmed(stat_src["mean_extension_velocity_nm_s"])
+        med_ret = _nanmed(stat_src["mean_retraction_velocity_nm_s"])
+        med_len = _nanmed(stat_src["max_length_nm"])
         # physically-impossible individual outputs (over-links / tracking jumps)
         vel = np.concatenate([
             np.asarray(pili["mean_extension_velocity_nm_s"], float),

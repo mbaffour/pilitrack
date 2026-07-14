@@ -53,9 +53,16 @@ def build_config(meta, *, config_file=None, cfg=None, overrides=None):
         loaded_cfg, loaded_det = provenance.load_config(config_file)
         detection.update(loaded_det or {})
         return loaded_cfg, detection
-    # split overrides into config fields vs detector-only params
+    # split overrides into config fields vs detector-only params. Whitelist the
+    # config keys against the AcquisitionConfig dataclass so a loader-only key
+    # (e.g. channel_names) or a typo doesn't reach AcquisitionConfig(**) and
+    # raise TypeError — such keys are simply not config overrides.
+    import dataclasses
     det_keys = set(DEFAULT_DETECTION)
-    cfg_over = {k: v for k, v in overrides.items() if k not in det_keys}
+    cfg_keys = {f.name for f in dataclasses.fields(AcquisitionConfig)}
+    cfg_keys.add("reference_pixel_size_nm")           # accepted by config_from_meta
+    cfg_over = {k: v for k, v in overrides.items()
+                if k not in det_keys and k in cfg_keys}
     detection.update({k: v for k, v in overrides.items() if k in det_keys})
     # detect_threshold is a config field the detector reads; apply the runner
     # default unless the caller overrode it.
