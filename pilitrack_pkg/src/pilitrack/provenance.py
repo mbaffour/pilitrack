@@ -175,15 +175,23 @@ def write_manifest(manifest: dict, path) -> str:
 
 
 def _json_safe(obj):
-    """Best-effort conversion of numpy / non-serializable values to JSON types."""
+    """Best-effort conversion of numpy / non-serializable values to JSON types.
+
+    Non-finite floats (NaN/Inf) are coerced to ``None`` — bare ``NaN``/``Infinity``
+    tokens are invalid JSON and are rejected by strict parsers (JS ``JSON.parse``,
+    R ``jsonlite``, ``jq``), which would silently break the reproducibility record
+    (e.g. ``percent_piliated = NaN`` on a pili-only movie with no cells)."""
+    import math
     import numpy as np
 
     if isinstance(obj, dict):
         return {str(k): _json_safe(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):
         return [_json_safe(v) for v in obj]
-    if isinstance(obj, np.generic):
-        return obj.item()
     if isinstance(obj, np.ndarray):
         return _json_safe(obj.tolist())
+    if isinstance(obj, np.generic):
+        obj = obj.item()
+    if isinstance(obj, float) and not math.isfinite(obj):
+        return None
     return obj

@@ -58,6 +58,12 @@ def analyze_for_web(path, *, detect_threshold=None, fast=True, frames=None,
         meta["shape_yx"] = (fluor.shape[1], fluor.shape[2])
         if meta.get("pixel_size_nm"):
             meta["pixel_size_nm"] = meta["pixel_size_nm"] * d
+    # Record the crop origin + stride so hand-labels drawn on this (possibly
+    # cropped/downsampled) view can be mapped back to the full movie: a label
+    # at (yl, xl) here is full-movie (roi_y0 + yl*d, roi_x0 + xl*d).
+    meta = dict(meta)
+    meta["roi"] = roi                       # (y0, y1, x0, x1) in full px, or None
+    meta["downsample"] = d
     overrides = {"detect_threshold": detect_threshold or DEFAULT_DETECT_THRESHOLD}
     cfg, detection = build_config(meta, overrides=overrides)
     seg, det = _backends(meta["single_channel"], detection)
@@ -173,6 +179,7 @@ def main():
                           "(or `pip install -e '.[web]'`).") from exc
     import io
     import json
+    import os
     import tempfile
 
     st.set_page_config(page_title="pilitrack", page_icon="🔬", layout="wide")
@@ -215,10 +222,19 @@ def main():
         src = path
         if up is not None:
             suffix = "." + up.name.split(".")[-1]
+            # remove the previous uploaded temp file before writing a new one so
+            # re-uploads don't pile up full-size copies in the OS temp dir
+            prev = st.session_state.get("_upload_tmp")
+            if prev:
+                try:
+                    os.unlink(prev)
+                except OSError:
+                    pass
             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
             tmp.write(up.getbuffer())
             tmp.close()
             src = tmp.name
+            st.session_state["_upload_tmp"] = src
         if not src or not Path(src).exists():
             st.error("Pick a movie file that exists, or upload one.")
             return
@@ -240,6 +256,10 @@ def main():
             try:
                 st.session_state["res"] = analyze_for_web(
                     src, detect_threshold=thr, fast=fast, model=model, downsample=ds)
+                # a fresh analysis -> drop hand traces tied to the previous movie
+                # so they can't leak into (and corrupt) this movie's labels
+                for k in ("manual_pili", "wip_points", "_last_click"):
+                    st.session_state.pop(k, None)
             except Exception as exc:
                 st.exception(exc)
                 return
@@ -348,6 +368,12 @@ def main():
                      f"**{len(added)}** pili across all frames.")
 
             movie_path = result["meta"].get("path")
+            roi = result["meta"].get("roi")
+            dsamp = int(result["meta"].get("downsample", 1) or 1)
+            # coords are in THIS (possibly cropped/downsampled) view; record how
+            # to map them back to the full movie so labels aren't misattributed.
+            view_meta = {"roi": list(roi) if roi else None, "downsample": dsamp,
+                         "view_shape_yx": [int(fluor.shape[1]), int(fluor.shape[2])]}
             stem = Path(movie_path).stem if movie_path and movie_path != "<array>" else "labels"
             outdir = st.text_input("Save training bundle to folder", value=f"training/{stem}")
             a, b = st.columns(2)
@@ -355,6 +381,7 @@ def main():
                 ann = annotations_from_art(art)          # detections as labels
                 ann.manual_pili += added                 # + your added traces
                 ann.movie = movie_path
+                ann.meta.update(view_meta)
                 meta = save_training_bundle(
                     outdir, stack=fluor, annotations=ann, cfg=cfg, movie_path=movie_path,
                     cell_labels=np.stack(art["per_frame_cell_labels"]))
@@ -363,7 +390,8 @@ def main():
             b.download_button(
                 "⬇ Download my traces (JSON)",
                 json.dumps(annotations_to_dict(
-                    Annotations(manual_pili=added, movie=movie_path)), indent=2),
+                    Annotations(manual_pili=added, movie=movie_path,
+                                meta=view_meta)), indent=2),
                 "my_traces.json", "application/json")
 
     with t_fig:
@@ -388,7 +416,11 @@ def main():
         dl[2].download_button("length_over_time.csv", ts.to_csv(index=False),
                               "pilus_length_over_time.csv", "text/csv")
         from pilitrack import provenance
-        man = provenance.build_manifest(input_path=path, cfg=cfg, meta=result["meta"],
+        # use the path actually analyzed (from meta), NOT the live sidebar box —
+        # which may have been edited since, or be empty for an uploaded file.
+        analyzed_path = result["meta"].get("path") or path
+        man = provenance.build_manifest(input_path=analyzed_path, cfg=cfg,
+                                        meta=result["meta"],
                                         results_summary=res["population"], qc=qc)
         dl[3].download_button("manifest.json", json.dumps(man, indent=2, default=str),
                               "manifest.json", "application/json")
