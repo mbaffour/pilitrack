@@ -74,6 +74,25 @@ def test_analyze_for_web_on_tiff(tmp_path):
     assert "flags" in r["qc"]
 
 
+def test_install_canvas_compat_restores_image_to_url():
+    # Streamlit >=1.30 removed streamlit.elements.image.image_to_url, which
+    # crashed the Label (draw) tab. The shim must put a working one back.
+    import streamlit.elements.image as st_image
+    from pilitrack.webapp import _install_canvas_compat
+    saved = getattr(st_image, "image_to_url", None)
+    try:
+        if hasattr(st_image, "image_to_url"):
+            del st_image.image_to_url          # force the broken state
+        _install_canvas_compat()
+        assert hasattr(st_image, "image_to_url")
+        url = st_image.image_to_url(np.zeros((4, 4, 3), np.uint8),
+                                    4, True, "RGB", "PNG", "id")
+        assert url.startswith("data:image/png;base64,")
+    finally:
+        if saved is not None:
+            st_image.image_to_url = saved
+
+
 def test_analyze_for_web_downsample_halves_and_rescales(tmp_path):
     tifffile = pytest.importorskip("tifffile")
     mov = (np.random.default_rng(0).random((4, 160, 160)) * 800).astype(np.uint16)

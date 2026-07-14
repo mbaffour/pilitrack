@@ -25,6 +25,38 @@ from pilitrack.qc import qc_metrics
 DEFAULT_MOVIE = str(Path(__file__).resolve().parents[3] / "Labelled data" / "trial01007.nd2")
 
 
+def _install_canvas_compat():
+    """Make ``streamlit-drawable-canvas`` work on modern Streamlit.
+
+    The canvas (0.9.x, the newest release) calls
+    ``streamlit.elements.image.image_to_url(image, width, clamp, channels, fmt, id)``.
+    Streamlit >=1.30 removed that function from that module (it moved to
+    ``elements.lib.image_utils`` and its signature changed), so every call raised
+    ``AttributeError: module 'streamlit.elements.image' has no attribute
+    'image_to_url'`` — which, because Streamlit runs *every* tab body on each
+    rerun, crashed the whole page. Restore a compatible function that just turns
+    the background image into a PNG data URI (no dependence on Streamlit's media
+    internals, so it survives future Streamlit changes)."""
+    import streamlit.elements.image as st_image
+    if hasattr(st_image, "image_to_url"):
+        return
+    import io
+    import base64
+    from PIL import Image
+
+    def image_to_url(image, width=None, clamp=False, channels="RGB",
+                     output_format="PNG", image_id=""):
+        if not isinstance(image, Image.Image):
+            image = Image.fromarray(np.asarray(image))
+        if image.mode not in ("RGB", "RGBA", "L"):
+            image = image.convert("RGB")
+        buf = io.BytesIO()
+        image.save(buf, format="PNG")
+        return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+
+    st_image.image_to_url = image_to_url
+
+
 def analyze_for_web(path, *, detect_threshold=None, fast=True, frames=None,
                     roi=None, pili_channel=None, cell_channel=None,
                     model=None, downsample=1) -> dict:
@@ -180,7 +212,7 @@ def main():
                               options=[1, 2, 4], value=1,
                               help="2× or 4× shrinks pixels so the full field fits "
                                    "in memory; pixel size is rescaled to match.")
-        go = st.button("Analyze", type="primary", use_container_width=True)
+        go = st.button("Analyze", type="primary", width="stretch")
 
     if go:
         src = path
@@ -244,11 +276,12 @@ def main():
         rgb = overlay_rgb(fluor[fr], art["per_frame_cell_labels"][fr],
                           art["per_frame_filaments"][fr])
         st.image(rgb, caption=f"Frame {fr} · green = cells, cyan = outline, magenta = pili",
-                 use_container_width=True)
+                 width="stretch")
 
     with t_label:
         try:
             from streamlit_drawable_canvas import st_canvas
+            _install_canvas_compat()   # bridge canvas 0.9.x <-> modern Streamlit
         except Exception:
             st.info("In-browser drawing needs `pip install streamlit-drawable-canvas`. "
                     "(Or use the desktop app `pilitrack-gui` for full correction.)")
@@ -301,15 +334,15 @@ def main():
         try:
             from pilitrack import figures
             p = figures.plot_distributions(res["pilus"], tempfile.mktemp(suffix=".png"))
-            st.image(p, use_container_width=True)
+            st.image(p, width="stretch")
             p2 = figures.plot_length_traces(art["tracks"], cfg, art["n_frames"],
                                             tempfile.mktemp(suffix=".png"))
-            st.image(p2, use_container_width=True)
+            st.image(p2, width="stretch")
         except Exception as exc:
             st.info(f"Figures need matplotlib ({exc}).")
 
     with t_data:
-        st.dataframe(res["pilus"], use_container_width=True, height=280)
+        st.dataframe(res["pilus"], width="stretch", height=280)
         ts = pilus_length_timeseries(art["tracks"], cfg, art["n_frames"])
         dl = st.columns(4)
         dl[0].download_button("pili.csv", res["pilus"].to_csv(index=False),
