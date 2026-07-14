@@ -43,6 +43,7 @@ pilitrack_pkg/
 | `provenance.py` | config save/load + run manifest (input hash, versions, params) |
 | `annotate.py` | hand-labeling core: traced pili → measured tracks; **`pili_mask`**; save/load |
 | **`dataset.py`** | **training storage: `save_training_bundle`, `collect_dataset`** |
+| **`ml.py`** | **trainable pilus detector: `train_from_dataset`, `predict_prob_stack`** (feeds `pilus_prob_stack`) |
 | `validate.py` | score automation vs hand labels (F1 + length agreement) |
 | `figures.py` · `stats.py` | kymographs/distributions · hierarchical bootstrap stats |
 | `viewer.py` | napari GUI (review, trace, edit cells, **Save for training**) |

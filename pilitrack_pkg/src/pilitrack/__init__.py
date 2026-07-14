@@ -9,7 +9,7 @@ from .annotate import Annotations, ManualPilus, apply_annotations, pili_mask
 from .dataset import save_training_bundle, collect_dataset
 from .viewer import launch_viewer, launch_annotator
 from . import (synth, io, singlechannel, qc, provenance, annotate, viewer,
-               validate, figures, stats, dataset)
+               validate, figures, stats, dataset, ml)
 
 __all__ = [
     "AcquisitionConfig",
@@ -48,5 +48,6 @@ __all__ = [
     "figures",
     "stats",
     "dataset",
+    "ml",
 ]
 __version__ = "0.1.0"

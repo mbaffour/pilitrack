@@ -31,6 +31,7 @@ web = ["streamlit>=1.30", "matplotlib>=3.7"]  # browser app (pilitrack-web)
 viewer = ["napari[all]>=0.5", "magicgui>=0.7"]  # desktop GUI + hand-labeling
 yaml = ["pyyaml"]                       # optional YAML config files
 # Optional detection backends (heavy / not hard dependencies):
+ml = ["scikit-learn>=1.1", "joblib"]  # trainable pilus detector (pilitrack.ml)
 cellpose = ["cellpose"]        # deep-learning cell instance segmentation (recommended)
 omnipose = ["omnipose"]        # alternative instance segmentation
 ilastik = ["h5py"]             # read ilastik headless probability exports
