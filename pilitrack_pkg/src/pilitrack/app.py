@@ -31,7 +31,7 @@ def _pick_file():
 
 def launch_app(path=None, *, fast: bool = False, roi=None, frames=None,
                pili_channel=None, cell_channel=None, config_file=None,
-               detect_threshold=None, run: bool = True):
+               detect_threshold=None, model=None, run: bool = True):
     """Open a movie and launch the interactive analysis/annotation window.
 
     Returns the napari ``Viewer``. With ``run=True`` (default) it also starts the
@@ -67,8 +67,15 @@ def launch_app(path=None, *, fast: bool = False, roi=None, frames=None,
           "  — analyzing (this can take a moment on a full frame) ...", flush=True)
 
     seg, det = _backends(meta["single_channel"], detection)
+    backend = {"segment_fn": seg, "detect_fn": det}
+    if model is not None:
+        from . import ml
+        print("  detector: trained ML model", flush=True)
+        backend = {"segment_fn": seg,
+                   "pilus_prob_stack": ml.predict_prob_stack(
+                       ml.resolve_model(model), fluor)}
     viewer = launch_annotator(fluor, fluor if meta["single_channel"] else cell,
-                              cfg, segment_fn=seg, detect_fn=det, movie_path=path)
+                              cfg, movie_path=path, **backend)
     print("Window open. Trace missed pili, edit cells, then Recompute / Export.",
           flush=True)
     if run:
@@ -91,13 +98,17 @@ def main(argv=None):
     p.add_argument("--cell-channel", type=int, default=None)
     p.add_argument("--config", default=None, help="reuse a saved config.json")
     p.add_argument("--detect-threshold", type=float, default=None)
+    p.add_argument("--model", default=None,
+                   help="trained detector .joblib, or 'bootstrap' (synthetic, no labels)")
     args = p.parse_args(argv)
 
+    from .analyze import resolve_model_arg
     frames = slice(*args.frames) if args.frames else None
     roi = tuple(args.roi) if args.roi else None
     launch_app(args.path, fast=args.fast, roi=roi, frames=frames,
                pili_channel=args.pili_channel, cell_channel=args.cell_channel,
-               config_file=args.config, detect_threshold=args.detect_threshold)
+               config_file=args.config, detect_threshold=args.detect_threshold,
+               model=resolve_model_arg(args.model))
 
 
 if __name__ == "__main__":

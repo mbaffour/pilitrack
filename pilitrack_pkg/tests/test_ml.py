@@ -68,3 +68,39 @@ def test_train_raises_without_positives():
     img = np.zeros((20, 20), np.float32)
     with pytest.raises(ValueError):
         train_pilus_detector([img], [np.zeros((20, 20), bool)])
+
+
+def test_bootstrap_model_usable_in_analyze():
+    from scipy.ndimage import gaussian_filter
+    from pilitrack.ml import bootstrap_synthetic_model
+    from pilitrack.analyze import analyze_file
+    model = bootstrap_synthetic_model(n_frames=3, n_estimators=10, cache=False)
+    assert model["source"] == "synthetic-bootstrap"
+    H = W = 100
+    yy, xx = np.ogrid[:H, :W]
+    cell = ((yy - 50) ** 2 + (xx - 50) ** 2) <= 8 ** 2
+    frames = []
+    for _ in range(4):
+        f = np.zeros((H, W), np.float32)
+        f[cell] += 3000.0
+        for k in range(18):
+            f[50, 58 + k] += 250.0
+        frames.append(gaussian_filter(f, 1.1) + 50.0)
+    mov = np.clip(np.stack(frames), 0, None).astype(np.uint16)
+    r = analyze_file(array=mov, array_axes="TYX", path="<array>", model=model,
+                     overrides={"pixel_size_nm": 43.3, "dt_s": 0.4,
+                                "min_pilus_length_nm": 200.0}, verbose=False)
+    assert r["detection"]["detector"] == "ml"
+
+
+def test_resolve_model_arg_none_and_path(tmp_path):
+    from pilitrack.analyze import resolve_model_arg
+    from pilitrack.ml import train_pilus_detector, save_model
+    assert resolve_model_arg(None) is None
+    img = np.zeros((30, 30), np.float32)
+    img[15, 5:25] += 200.0
+    mask = np.zeros((30, 30), bool)
+    mask[14:17, 5:25] = True
+    m = train_pilus_detector([img], [mask], n_estimators=8)
+    p = save_model(m, tmp_path / "m.joblib")
+    assert resolve_model_arg(p)["n_train"] == m["n_train"]

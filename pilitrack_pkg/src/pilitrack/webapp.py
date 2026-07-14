@@ -26,9 +26,11 @@ DEFAULT_MOVIE = str(Path(__file__).resolve().parents[3] / "Labelled data" / "tri
 
 
 def analyze_for_web(path, *, detect_threshold=None, fast=True, frames=None,
-                    roi=None, pili_channel=None, cell_channel=None) -> dict:
+                    roi=None, pili_channel=None, cell_channel=None,
+                    model=None) -> dict:
     """Load + analyze a movie for the web UI. Returns everything the page renders
-    (fluor stack, cfg, detect_and_link art, summary, qc, meta)."""
+    (fluor stack, cfg, detect_and_link art, summary, qc, meta). ``model`` (a
+    trained detector or path) replaces the ridge filter when given."""
     if fast and roi is None:
         _, _, m0 = load_movie(path, frames=slice(0, 1))
         H, W = m0["shape_yx"]
@@ -42,8 +44,14 @@ def analyze_for_web(path, *, detect_threshold=None, fast=True, frames=None,
     overrides = {"detect_threshold": detect_threshold or DEFAULT_DETECT_THRESHOLD}
     cfg, detection = build_config(meta, overrides=overrides)
     seg, det = _backends(meta["single_channel"], detection)
+    prob = None
+    if model is not None:
+        from pilitrack import ml
+        prob = ml.predict_prob_stack(ml.resolve_model(model), fluor)
     art = detect_and_link(fluor, fluor if meta["single_channel"] else cell, cfg,
-                          segment_fn=seg, detect_fn=det)
+                          segment_fn=seg,
+                          detect_fn=(None if prob is not None else det),
+                          pilus_prob_stack=prob)
     res = summarize(art["tracks"], art["per_frame_cell_labels"], cfg, art["n_frames"])
     qc = qc_metrics(fluor, art, res, cfg)
     return {"fluor": fluor, "cfg": cfg, "art": art, "res": res, "qc": qc, "meta": meta}
@@ -114,6 +122,18 @@ def main():
         path = st.text_input("File path", value=default,
                              help="ND2 / TIFF / OME-TIFF / CZI on this computer")
         up = st.file_uploader("…or upload", type=["nd2", "tif", "tiff", "czi"])
+        st.header("Detector")
+        det_choice = st.radio(
+            "Pilus detector",
+            ["Built-in ridge (recommended)", "Trained model — upload .joblib",
+             "Synthetic bootstrap (experimental)"],
+            help="Ridge works well on real data today. Upload a model trained on "
+                 "YOUR labels for the best results. The synthetic bootstrap is a "
+                 "no-labels starting point — it may not match your data (train on "
+                 "real labels to beat the ridge).")
+        model_file = None
+        if det_choice.startswith("Trained model"):
+            model_file = st.file_uploader("Trained model (.joblib)", type=["joblib"])
         st.header("Settings")
         thr = st.slider("Detection threshold", 0.15, 0.60, 0.30, 0.05,
                         help="Higher = stricter (less noise, may miss faint pili)")
@@ -132,9 +152,24 @@ def main():
         if not src or not Path(src).exists():
             st.error("Pick a movie file that exists, or upload one.")
             return
+        model = None
+        if det_choice.startswith("Synthetic bootstrap"):
+            with st.spinner("Preparing the synthetic model (first time trains it)…"):
+                from pilitrack import ml
+                model = ml.bootstrap_synthetic_model()
+        elif det_choice.startswith("Trained model"):
+            if model_file is None:
+                st.warning("Upload a .joblib model, or pick a different detector.")
+                return
+            from pilitrack import ml
+            mt = tempfile.NamedTemporaryFile(delete=False, suffix=".joblib")
+            mt.write(model_file.getbuffer())
+            mt.close()
+            model = ml.load_model(mt.name)
         with st.spinner("Analyzing… (first run also loads the movie)"):
             try:
-                st.session_state["res"] = analyze_for_web(src, detect_threshold=thr, fast=fast)
+                st.session_state["res"] = analyze_for_web(
+                    src, detect_threshold=thr, fast=fast, model=model)
             except Exception as exc:
                 st.exception(exc)
                 return

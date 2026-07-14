@@ -43,7 +43,7 @@ two-channel stack
 pip install -e .            # core (numpy, scipy, scikit-image, pandas)
 pip install -e ".[dev]"     # + pytest
 pip install -e ".[io,qc]"   # + nd2/tifffile reader and matplotlib QC (for real movies)
-pytest                      # 107 tests
+pytest                      # 109 tests
 python examples/run_synthetic.py
 ```
 
@@ -262,11 +262,21 @@ prob = predict_prob_stack(model, fluor_stack)    # (T, Y, X) in [0, 1]
 res = analyze_movie(fluor, cells, cfg, pilus_prob_stack=prob)
 ```
 
-On held-out data the learned detector beats the fixed ridge filter — **F1 0.59
-vs 0.08** on deliberately faint synthetic pili (bright cells swamp the fixed
-filter), and **0.69 vs 0.63** on real public vessel data (DRIVE), driven by a big
-precision gain at equal recall. It improves as more labels arrive. Needs
-`pip install -e ".[ml]"` (scikit-learn).
+**Use it in the apps.** The browser app has a **Detector** selector (built-in
+ridge · upload a trained `.joblib` · synthetic bootstrap); the runners take
+`--model model.joblib` (or `--model bootstrap`); `analyze_file(..., model=...)`
+in code. A trained model replaces the ridge filter by feeding its probability map
+into the pipeline.
+
+**How well it works — honestly.** On data that matches its training, the learned
+detector beats the fixed ridge filter — **F1 0.59 vs 0.08** on faint synthetic
+pili, **0.69 vs 0.63** on real public vessel data (DRIVE). More training frames
+help (synthetic F1 0.52 → 0.63 from 2 → 8 frames, then plateaus). **But** a model
+trained only on *synthetic* pili does **not** transfer to the real movie (fewer
+qualified pili than the ridge) — a domain gap. So the built-in ridge stays the
+default, the synthetic bootstrap is an experimental no-labels starting point, and
+the real win comes from **training on the lab's own labelled frames**
+(`train_from_dataset` → upload the model). Needs `pip install -e ".[ml]"`.
 
 ## Validation against ground truth & figures (for publication)
 

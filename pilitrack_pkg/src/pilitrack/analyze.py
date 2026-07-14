@@ -93,6 +93,7 @@ def analyze_file(
     overrides=None,
     array=None,
     array_axes="TYX",
+    model=None,
     qc_frames: int = 3,
     save_overlays: bool = True,
     hash_max_bytes: int | None = None,
@@ -127,8 +128,19 @@ def analyze_file(
     segment_fn, detect_fn = _backends(meta["single_channel"], detection)
     cell_stack = fluor if meta["single_channel"] else cell
 
-    art = detect_and_link(fluor, cell_stack, cfg,
-                          segment_fn=segment_fn, detect_fn=detect_fn)
+    # a trained ML detector (path or model) replaces the ridge filter by feeding
+    # its probability map into the pipeline's pilus_prob_stack seam.
+    prob = None
+    if model is not None:
+        from . import ml
+        if verbose:
+            print("  detector              = trained ML model")
+        prob = ml.predict_prob_stack(ml.resolve_model(model), fluor)
+    detection["detector"] = "ml" if prob is not None else "ridge"
+
+    art = detect_and_link(fluor, cell_stack, cfg, segment_fn=segment_fn,
+                          detect_fn=(None if prob is not None else detect_fn),
+                          pilus_prob_stack=prob)
     res = summarize(art["tracks"], art["per_frame_cell_labels"], cfg, art["n_frames"])
     qc = qc_metrics(fluor, art, res, cfg)
 
@@ -238,9 +250,24 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--tophat", type=float, default=None, dest="tophat_radius_px")
     p.add_argument("--open-radius", type=float, default=None, dest="open_radius_px")
     p.add_argument("--min-cell-area", type=int, default=None, dest="min_cell_area_px")
+    p.add_argument("--model", default=None,
+                   help="trained detector .joblib, or 'bootstrap' for the "
+                        "no-labels synthetic model")
     p.add_argument("--qc-frames", type=int, default=3)
     p.add_argument("--no-viewer", action="store_true")
     return p
+
+
+def resolve_model_arg(model):
+    """CLI/GUI ``--model`` value -> a model dict (or None). ``'bootstrap'`` trains
+    (or reloads) the synthetic no-labels model; anything else is a path."""
+    if not model:
+        return None
+    if str(model).lower() == "bootstrap":
+        from . import ml
+        return ml.bootstrap_synthetic_model()
+    from . import ml
+    return ml.load_model(model)
 
 
 def _overrides_from_args(args) -> dict:
@@ -273,7 +300,8 @@ def main(argv=None):
         args.path, out=args.out, config_file=args.config,
         pili_channel=args.pili_channel, cell_channel=args.cell_channel,
         z=z, position=args.position, frames=frames, roi=roi,
-        overrides=_overrides_from_args(args), qc_frames=args.qc_frames)
+        overrides=_overrides_from_args(args), model=resolve_model_arg(args.model),
+        qc_frames=args.qc_frames)
     print(f"\nWrote results to {args.out}")
 
     if not args.no_viewer:

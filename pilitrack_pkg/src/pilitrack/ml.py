@@ -166,3 +166,66 @@ def save_model(model, path) -> str:
 def load_model(path):
     import joblib
     return joblib.load(str(path))
+
+
+def resolve_model(model):
+    """Accept a model dict or a path to a saved model; return the model dict."""
+    if model is None or isinstance(model, dict):
+        return model
+    return load_model(model)
+
+
+# --------------------------------------------------------------------------- #
+# Bootstrap: a usable detector with NO hand labels, trained on synthetic pili.
+# A starting point that already beats the fixed ridge filter on faint pili;
+# retrain on real labels as they arrive.
+# --------------------------------------------------------------------------- #
+def _synthetic_frame(rng, H=140, W=140, n_pili=7, n_cells=3):
+    from scipy.ndimage import gaussian_filter, binary_dilation
+    img = np.full((H, W), 30.0)
+    mask = np.zeros((H, W), bool)
+    yy, xx = np.ogrid[:H, :W]
+    for _ in range(n_cells):
+        cy, cx = rng.uniform(20, H - 20), rng.uniform(20, W - 20)
+        img[((yy - cy) ** 2 + (xx - cx) ** 2) <= rng.uniform(5, 9) ** 2] += rng.uniform(1800, 4200)
+    for _ in range(n_pili):
+        y0, x0 = rng.uniform(12, H - 12), rng.uniform(12, W - 12)
+        ang, L = rng.uniform(0, 2 * np.pi), rng.uniform(12, 34)
+        ts = np.linspace(0, L, int(L * 3))
+        ys = np.clip((y0 + ts * np.sin(ang)).astype(int), 0, H - 1)
+        xs = np.clip((x0 + ts * np.cos(ang)).astype(int), 0, W - 1)
+        img[ys, xs] += rng.uniform(35, 130)          # varied faintness
+        mask[ys, xs] = True
+    img = gaussian_filter(img, 1.0)
+    img = rng.poisson(np.clip(img, 0, None)) + rng.normal(0, 8, (H, W))
+    return np.clip(img, 0, None).astype(np.float32), binary_dilation(mask)
+
+
+def synthetic_training_data(n_frames: int = 16, seed: int = 0):
+    """(images, masks) of synthetic bright filaments on noisy cell backgrounds."""
+    rng = np.random.default_rng(seed)
+    pairs = [_synthetic_frame(rng) for _ in range(n_frames)]
+    return [p[0] for p in pairs], [p[1] for p in pairs]
+
+
+def _cache_dir() -> Path:
+    d = Path.home() / ".pilitrack" / "models"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def bootstrap_synthetic_model(*, n_frames: int = 16, n_estimators: int = 120,
+                              seed: int = 0, cache: bool = True):
+    """A ready-to-use pilus detector trained on synthetic data — **no hand
+    labels required**. Cached to ``~/.pilitrack/models`` so it trains once
+    (a few seconds) and reloads instantly. Retrain on real labels via
+    ``train_from_dataset`` when you have them."""
+    path = _cache_dir() / f"bootstrap_rf_n{n_frames}_e{n_estimators}_s{seed}.joblib"
+    if cache and path.exists():
+        return load_model(path)
+    imgs, masks = synthetic_training_data(n_frames, seed=seed)
+    model = train_pilus_detector(imgs, masks, n_estimators=n_estimators, seed=seed)
+    model["source"] = "synthetic-bootstrap"
+    if cache:
+        save_model(model, path)
+    return model
