@@ -43,7 +43,7 @@ two-channel stack
 pip install -e .            # core (numpy, scipy, scikit-image, pandas)
 pip install -e ".[dev]"     # + pytest
 pip install -e ".[io,qc]"   # + nd2/tifffile reader and matplotlib QC (for real movies)
-pytest                      # 109 tests
+pytest                      # 113 tests
 python examples/run_synthetic.py
 ```
 
@@ -231,10 +231,24 @@ unit-tested, so the science is verified even though the window needs a screen.
 
 ## Labeling → training data
 
-Hand labels aren't just for correcting one movie — they're the seed corpus for a
-better detector. The GUI's **Save for training** button (or
-`dataset.save_training_bundle`) writes a self-contained, ML-ready **bundle** per
-movie: `images/` + `pili_masks/` + `cell_masks/` (image↔mask pairs) plus
+**The flywheel: detect → correct → train.** Don't trace from a blank frame — let
+the detector go first, then *correct* it. In the napari desktop app
+(`pilitrack-gui`), click **Seed from detection** to fill the editable layer with
+the auto-detected pili; then delete the false ones, adjust, and add the missed
+ones. Because the whole set is now editable, **Save for training** captures
+*every* pilus (not just your additions) — a complete label. Or pre-label a whole
+batch headless and hand the JSONs to labellers:
+
+```bash
+pilitrack-prelabel movie.nd2 --out prelabels.json     # detect -> editable labels
+pilitrack-gui movie.nd2 --load prelabels.json          # open, correct, Save for training
+```
+
+More corrected labels → a better model → better auto-detection → less correcting
+next time.
+
+The **Save for training** button (or `dataset.save_training_bundle`) writes a
+self-contained, ML-ready **bundle** per movie: `images/` + `pili_masks/` + `cell_masks/` (image↔mask pairs) plus
 `annotations.json` (vector traces) and `metadata.json` (movie SHA-256, pixel
 size, dt, ROI, labelled frames, versions). Collect many into a training set:
 

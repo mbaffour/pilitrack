@@ -112,20 +112,24 @@ def manual_filament(points, shape, label: int = -1) -> Filament:
 # Fold annotations into a detect_and_link result and re-summarize
 # --------------------------------------------------------------------------- #
 def apply_annotations(art: dict, annotations: Annotations, cfg,
-                      cell_labels=None, keep_ids=None) -> dict:
+                      cell_labels=None, keep_ids=None,
+                      replace_auto: bool = False) -> dict:
     """Merge manual pili + (optional) edited cell labels + track removals into an
     ``art`` (``detect_and_link`` result) and re-run linking + summary.
 
     ``cell_labels``: a ``(T, Y, X)`` int stack (e.g. painted in the GUI) that
-    replaces the auto cell segmentation. Returns ``{"art": new_art,
-    "summary": {...}}`` where ``new_art`` has the manual filaments merged in.
+    replaces the auto cell segmentation. ``replace_auto=True`` treats the manual
+    pili as the *complete* label set (used after seeding the editable layer from
+    the detection — otherwise the seeded copies would double-count the auto
+    detections). Returns ``{"art": new_art, "summary": {...}}``.
     """
     n = art["n_frames"]
     shape = art["shape"]
     cells = (list(cell_labels) if cell_labels is not None
              else list(art["per_frame_cell_labels"]))
 
-    per_fil = [list(fils) for fils in art["per_frame_filaments"]]
+    per_fil = ([[] for _ in range(n)] if replace_auto
+               else [list(fils) for fils in art["per_frame_filaments"]])
     next_label = 1 + max(
         (f.label for fils in per_fil for f in fils if f.label is not None),
         default=0)
@@ -152,6 +156,52 @@ def apply_annotations(art: dict, annotations: Annotations, cfg,
     new_art["per_frame_cell_labels"] = cells
     new_art["tracks"] = tracks
     return {"art": new_art, "summary": summary}
+
+
+# --------------------------------------------------------------------------- #
+# Pre-annotation: turn the detection into editable labels to correct
+# --------------------------------------------------------------------------- #
+def _order_skeleton_path(coords, base_yx) -> list:
+    """Order skeleton pixels into a path starting from the base endpoint."""
+    pts = [tuple(int(v) for v in c) for c in np.asarray(coords)]
+    if len(pts) <= 1:
+        return [list(base_yx)]
+    s = set(pts)
+    start = min(pts, key=lambda p: (p[0] - base_yx[0]) ** 2 + (p[1] - base_yx[1]) ** 2)
+    ordered, seen, cur = [start], {start}, start
+    while True:
+        nxt = [(cur[0] + dy, cur[1] + dx)
+               for dy in (-1, 0, 1) for dx in (-1, 0, 1)
+               if not (dy == 0 and dx == 0)]
+        nxt = [p for p in nxt if p in s and p not in seen]
+        if not nxt:
+            break
+        cur = nxt[0]
+        seen.add(cur)
+        ordered.append(cur)
+    return [list(p) for p in ordered]
+
+
+def annotations_from_art(art: dict, *, simplify_tol: float = 1.5) -> Annotations:
+    """Convert a ``detect_and_link`` result into **editable** annotations — the
+    auto-detected pili as centerline traces a person can correct (delete false
+    ones, adjust, add missed ones). This is the pre-annotation step: detect ->
+    JSON -> human corrects -> train. Carries each filament's cell/track id."""
+    from skimage.measure import approximate_polygon
+
+    pili = []
+    for t, fils in enumerate(art.get("per_frame_filaments", [])):
+        for f in fils:
+            path = np.asarray(_order_skeleton_path(f.coords, f.base_yx), dtype=float)
+            if simplify_tol and path.shape[0] > 2:
+                path = approximate_polygon(path, simplify_tol)
+            if path.shape[0] < 2:
+                path = np.array([list(f.base_yx), list(f.tip_yx)], dtype=float)
+            pili.append(ManualPilus(
+                frame=int(t), points=path.tolist(),
+                cell_id=(int(f.cell_id) if f.cell_id is not None else None),
+                track_id=(int(f.track_id) if f.track_id is not None else None)))
+    return Annotations(manual_pili=pili, meta={"source": "auto-detection"})
 
 
 # --------------------------------------------------------------------------- #
@@ -235,3 +285,57 @@ def load_annotations(path):
         import tifffile
         cell_labels = tifffile.imread(str(cells_path))
     return ann, cell_labels
+
+
+# --------------------------------------------------------------------------- #
+# CLI: pilitrack-prelabel movie.nd2  ->  editable labels JSON to correct
+# --------------------------------------------------------------------------- #
+def prelabel_main(argv=None):
+    """Auto-detect pili on a movie and write an **editable** labels JSON — the
+    pre-annotation. A person then opens it (``pilitrack-gui --model`` / the GUI
+    Load button), corrects it, and saves; those corrections become training data.
+    Runs headless, so you can pre-label a whole batch of movies at once."""
+    import argparse
+
+    from .io import load_movie
+    from .analyze import build_config, _backends, DEFAULT_DETECT_THRESHOLD
+    from .pipeline import detect_and_link
+
+    p = argparse.ArgumentParser(description=prelabel_main.__doc__)
+    p.add_argument("path", help="movie file (.nd2/.tif/.czi)")
+    p.add_argument("--out", default="prelabels.json")
+    p.add_argument("--fast", action="store_true", help="center 512 crop + first 12 frames")
+    p.add_argument("--roi", type=int, nargs=4, metavar=("Y0", "Y1", "X0", "X1"), default=None)
+    p.add_argument("--frames", type=int, nargs=2, metavar=("START", "STOP"), default=None)
+    p.add_argument("--detect-threshold", type=float, default=None)
+    args = p.parse_args(argv)
+
+    frames = slice(*args.frames) if args.frames else None
+    roi = tuple(args.roi) if args.roi else None
+    if args.fast and roi is None:
+        _, _, m0 = load_movie(args.path, frames=slice(0, 1))
+        H, W = m0["shape_yx"]
+        c = 256
+        y0, x0 = max(0, H // 2 - c), max(0, W // 2 - c)
+        roi = (y0, y0 + 2 * c, x0, x0 + 2 * c)
+        if frames is None:
+            frames = slice(0, 12)
+
+    fluor, cell, meta = load_movie(args.path, frames=frames, roi=roi)
+    cfg, detection = build_config(meta, overrides={
+        "detect_threshold": args.detect_threshold or DEFAULT_DETECT_THRESHOLD})
+    seg, det = _backends(meta["single_channel"], detection)
+    art = detect_and_link(fluor, fluor if meta["single_channel"] else cell, cfg,
+                          segment_fn=seg, detect_fn=det)
+    ann = annotations_from_art(art)
+    ann.movie = str(args.path)
+    ann.meta.update({"roi": list(roi) if roi else None,
+                     "pixel_size_nm": cfg.pixel_size_nm, "dt_s": cfg.dt_s})
+    save_annotations(ann, args.out)
+    print(f"Wrote {len(ann.manual_pili)} pre-labelled pili to {args.out}.\n"
+          f"Correct them: pilitrack-gui \"{args.path}\" --load {args.out}")
+    return ann
+
+
+if __name__ == "__main__":
+    prelabel_main()

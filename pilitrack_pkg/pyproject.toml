@@ -20,6 +20,7 @@ dependencies = [
 pilitrack-gui = "pilitrack.app:main"
 pilitrack-batch = "pilitrack.batch:main"
 pilitrack-validate = "pilitrack.validate:main"
+pilitrack-prelabel = "pilitrack.annotate:prelabel_main"
 pilitrack-web = "pilitrack.web_launch:main"
 
 [project.optional-dependencies]

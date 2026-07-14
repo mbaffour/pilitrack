@@ -190,7 +190,11 @@ def launch_annotator(fluor_stack: np.ndarray, cell_stack: np.ndarray,
         name="manual pili (draw)", shape_type="path",
         edge_color="magenta", edge_width=2)
 
-    state = {"art": base_art, "summary": None, "removed": set(ann.removed_track_ids)}
+    # "seeded": the editable layer holds the COMPLETE label set (from seeding the
+    # detection or loading a labels file), so recompute must not also add the
+    # auto detections underneath. Fresh sessions start in add-to-detection mode.
+    state = {"art": base_art, "summary": None, "removed": set(ann.removed_track_ids),
+             "seeded": bool(getattr(ann, "manual_pili", None))}
 
     def _recompute():
         manual = _annotate.shapes_to_manual_pili(list(shapes_layer.data))
@@ -199,7 +203,8 @@ def launch_annotator(fluor_stack: np.ndarray, cell_stack: np.ndarray,
             manual_pili=manual, removed_track_ids=list(state["removed"]),
             movie=movie_path)
         out = _annotate.apply_annotations(base_art, annotations_now, cfg,
-                                          cell_labels=cells)
+                                          cell_labels=cells,
+                                          replace_auto=state.get("seeded", False))
         state["art"] = out["art"]
         state["summary"] = out["summary"]
         state["annotations"] = annotations_now
@@ -225,6 +230,18 @@ def launch_annotator(fluor_stack: np.ndarray, cell_stack: np.ndarray,
     state["results_label"] = results_label
     _recompute()  # seed the summary from any preloaded annotations
 
+    @magicgui(call_button="Seed editable layer from detection")
+    def seed():
+        """Fill the editable layer with the auto-detected pili so you correct
+        them (delete false, adjust, add missed) instead of tracing from scratch —
+        and the saved labels then cover ALL pili, not just your additions."""
+        auto = _annotate.annotations_from_art(base_art)
+        shapes_layer.data = _annotate.manual_pili_to_shapes(auto.manual_pili)
+        state["seeded"] = True
+        _recompute()
+        napari.utils.notifications.show_info(
+            f"Seeded {len(auto.manual_pili)} detected pili — correct them, then Save.")
+
     @magicgui(call_button="Recompute (fold in traced pili + cell edits)")
     def recompute():
         _recompute()
@@ -249,6 +266,7 @@ def launch_annotator(fluor_stack: np.ndarray, cell_stack: np.ndarray,
         if cells is not None:
             cells_layer.data = np.asarray(cells).astype(np.int32)
         state["removed"] = set(loaded.removed_track_ids)
+        state["seeded"] = True   # a loaded label set is the complete working set
         _recompute()
 
     @magicgui(call_button="Export CSVs", directory={"mode": "d"})
@@ -284,9 +302,10 @@ def launch_annotator(fluor_stack: np.ndarray, cell_stack: np.ndarray,
             f"frames) to {directory}")
 
     viewer.window.add_dock_widget(results_label, name="results", area="right")
-    for w, name in [(recompute, "recompute"), (cull, "fix tracks"),
-                    (save, "save"), (load, "load"), (export, "CSVs"),
-                    (figs, "figures"), (save_training, "save for training")]:
+    for w, name in [(seed, "seed from detection"), (recompute, "recompute"),
+                    (cull, "fix tracks"), (save, "save"), (load, "load"),
+                    (export, "CSVs"), (figs, "figures"),
+                    (save_training, "save for training")]:
         viewer.window.add_dock_widget(w, name=name, area="right")
     viewer._pilitrack_state = state
     return viewer

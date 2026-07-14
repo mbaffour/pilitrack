@@ -57,6 +57,7 @@ pilitrack_pkg/
 | `pilitrack-web` · **Start pilitrack (browser)** | browser app: pick movie → analyze → download |
 | `pilitrack-gui` · **Start pilitrack (desktop)** | napari: trace missed pili, edit cells, save labels |
 | `pilitrack-batch <folder>` | analyze every movie in a folder |
+| `pilitrack-prelabel <movie>` | auto-detect → editable labels JSON (correct, then train) |
 | `pilitrack-validate <movie> --labels <json>` | detection F1 + length agreement vs hand labels |
 
 ## Where results and labels go
