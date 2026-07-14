@@ -205,6 +205,11 @@ def load_nd2(
         stack = _to_txy(arr, sizes, channel=channel)
         if frames is not None:
             stack = stack[frames]
+            if frame_times is not None:
+                try:
+                    frame_times = np.asarray(frame_times)[frames]
+                except Exception:  # pragma: no cover - odd index types
+                    pass
         if roi is not None:
             y0, y1, x0, x1 = roi
             stack = stack[:, y0:y1, x0:x1]
@@ -254,7 +259,12 @@ def config_from_meta(
     quantization masquerades as real extension/retraction. Any keyword in
     ``overrides`` wins over every computed value.
     """
-    pixel_size_nm = float(meta["pixel_size_nm"])
+    pixel_size_nm = meta.get("pixel_size_nm", None)
+    if pixel_size_nm is None and "pixel_size_nm" not in overrides:
+        raise ValueError(
+            "movie metadata has no pixel size; pass pixel_size_nm=<nm> "
+            "(e.g. config_from_meta(meta, pixel_size_nm=65)).")
+    pixel_size_nm = float(overrides.get("pixel_size_nm", pixel_size_nm))
     dt_s = meta.get("dt_s", None)
     if dt_s is None and "dt_s" not in overrides:
         raise ValueError(
@@ -344,20 +354,23 @@ def _to_tcyx(arr, sizes: dict, z="max", position: int = 0) -> np.ndarray:
     axes = [ax for ax in axes if ax not in _POSITION_AXES]
 
     # A lone stack axis with no explicit time axis IS the time series here:
-    # TIRF pili imaging is single-plane, and plain multi-page TIFFs / ImageJ
-    # stacks saved with slices=N (frames=1) report their frames on Z. Treat that
-    # Z as T instead of max-projecting every frame into one. Genuine 3-D
-    # time-lapses (T *and* Z present) still get Z projected below.
-    if "Z" in axes and "T" not in axes:
-        axes[axes.index("Z")] = "T"
+    # TIRF pili imaging is single-plane, and a plain multi-page TIFF reports its
+    # frames on Z (ImageJ slices=N) or on a generic sequence axis 'Q'/'I'
+    # (tifffile). Treat whatever single stack axis remains as T instead of
+    # collapsing/erroring on it. Genuine 3-D time-lapses (T *and* Z present) fall
+    # through and still get Z projected below.
+    if "T" not in axes:
+        stack_axes = [a for a in axes if a not in ("C", "Y", "X")]
+        if len(stack_axes) == 1:
+            axes[axes.index(stack_axes[0])] = "T"
 
-    # collapse Z
+    # collapse Z (dask-native so an as_dask read stays lazy until .compute())
     if "Z" in axes:
         zi = axes.index("Z")
         if z == "max":
-            arr = np.asarray(arr).max(axis=zi)
+            arr = arr.max(axis=zi)
         elif z == "mean":
-            arr = np.asarray(arr).mean(axis=zi)
+            arr = arr.mean(axis=zi)
         else:
             zidx = [slice(None)] * arr.ndim
             zidx[zi] = int(z)
@@ -386,6 +399,13 @@ def _guess_pili_channel(channel_names, n_channels: int) -> int:
     for i, name in enumerate(channel_names[:n_channels]):
         nm = str(name).lower()
         if any(h in nm for h in _PILISH_HINTS) and not any(c in nm for c in _CELLISH):
+            return i
+    # No positive fluorophore match: at least avoid picking a transmitted-light/
+    # phase channel as the pilus channel (that would quantify pili on the wrong
+    # image). Prefer the first non-cell-ish channel; only fall back to 0 if all
+    # channels look cell-ish.
+    for i, name in enumerate(channel_names[:n_channels]):
+        if not any(c in str(name).lower() for c in _CELLISH):
             return i
     return 0
 
@@ -468,7 +488,8 @@ def _read_czi_raw(path, *, z, position, frames, roi, as_dask):
         AICSImage = None
     if AICSImage is not None:
         img = AICSImage(str(path))
-        if position < img.dims.S if "S" in img.dims.order else 1:
+        n_scenes = img.dims.S if "S" in img.dims.order else 1
+        if position < n_scenes:
             try:
                 img.set_scene(position)
             except Exception:
@@ -613,6 +634,14 @@ def load_movie(
         )
     tcyx, meta = reader(path, z=z, position=position, frames=frames,
                         roi=roi, as_dask=as_dask)
+    # keep per-frame timestamps aligned with the frames actually loaded, so
+    # duration_s / window_s and frame_times_s describe the subset, not the movie.
+    if frames is not None and meta.get("frame_times_s") is not None:
+        ft = np.asarray(meta["frame_times_s"])
+        try:
+            meta["frame_times_s"] = ft[frames]
+        except Exception:  # pragma: no cover - odd index types
+            pass
     C = tcyx.shape[1]
     names = meta.get("channel_names") or []
     if pili_channel is None:

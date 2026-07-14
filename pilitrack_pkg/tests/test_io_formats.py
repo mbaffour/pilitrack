@@ -37,6 +37,48 @@ def test_to_tcyx_lone_z_is_time():
     assert out2.shape == (7, 2, 8, 8)
 
 
+def test_to_tcyx_generic_sequence_axis_is_time():
+    # tifffile labels a plain multi-page TIFF's page axis 'Q' (or 'I'); it must
+    # be treated as time, not rejected as an unsupported axis.
+    for stack_axis in ("Q", "I"):
+        out = _to_tcyx(np.zeros((6, 8, 8)), {stack_axis: 6, "Y": 8, "X": 8})
+        assert out.shape == (6, 1, 8, 8)
+
+
+def test_config_from_meta_pixel_size_none_uses_override():
+    cfg = config_from_meta({"pixel_size_nm": None, "dt_s": 0.4, "duration_s": 5.0},
+                           pixel_size_nm=65.0)
+    assert cfg.pixel_size_nm == 65.0
+    # and with no override it should error clearly, not TypeError on float(None)
+    with pytest.raises(ValueError):
+        config_from_meta({"pixel_size_nm": None, "dt_s": 0.4})
+
+
+def test_guess_pili_channel_avoids_phase_without_fluor_keyword():
+    # neither name has a fluorophore keyword; must still avoid the phase channel
+    assert _guess_pili_channel(["Phase", "Pili"], 2) == 1
+    assert _guess_cell_channel(["Phase", "Pili"], 2, 1) == 0
+
+
+def test_plain_multipage_tiff_loads_all_frames(tmp_path):
+    tifffile = pytest.importorskip("tifffile")
+    mov = (np.random.default_rng(1).random((7, 32, 32)) * 300).astype(np.uint16)
+    p = tmp_path / "plain.tif"
+    tifffile.imwrite(str(p), mov)          # no ImageJ/OME metadata -> axes 'QYX'
+    fluor, cell, meta = load_movie(str(p))
+    assert meta["n_timepoints"] == 7 and fluor.shape[0] == 7
+
+
+def test_frames_subset_slices_frame_times(tmp_path):
+    # duration must reflect the selected frames, not the whole movie
+    tifffile = pytest.importorskip("tifffile")
+    mov = (np.random.default_rng(2).random((10, 16, 16)) * 300).astype(np.uint16)
+    p = tmp_path / "t.ome.tif"
+    tifffile.imwrite(str(p), mov, metadata={"axes": "TYX", "TimeIncrement": 0.5})
+    _, _, meta = load_movie(str(p), frames=slice(2, 5))
+    assert meta["n_timepoints"] == 3
+
+
 def test_to_tcyx_selects_position():
     a = np.zeros((2, 3, 6, 6))  # P, T, Y, X
     a[1] = 5
