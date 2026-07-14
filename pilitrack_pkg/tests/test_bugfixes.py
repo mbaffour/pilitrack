@@ -187,3 +187,24 @@ def test_qc_organism_envelope_widens_ranges():
               sane_maxlen_nm=ng_env["maxlen_nm"])
     assert any("length" in f for f in qc_flags(pa))     # flagged for P. aeruginosa
     assert not any("length" in f for f in qc_flags(ng)) # fine for Neisseria
+
+
+def test_crossing_pili_are_split_into_two():
+    """Two crossing pili (an X) must resolve into TWO through-filaments of the
+    right length, not one summed blob — and a single line stays one filament."""
+    from skimage.draw import line
+    from skimage.morphology import skeletonize
+    from pilitrack.measure import extract_filaments
+    cfg = AcquisitionConfig(dt_s=0.4, pixel_size_nm=65.0)
+    img = np.zeros((70, 70), bool)
+    for (y0, x0, y1, x1) in [(5, 5, 50, 50), (5, 50, 50, 5)]:
+        rr, cc = line(y0, x0, y1, x1)
+        img[rr, cc] = True
+    fils = extract_filaments(skeletonize(img), cfg)
+    assert len(fils) == 2
+    for f in fils:
+        assert 55 < f.length_px < 75          # ~one diagonal each (~63 px)
+    one = np.zeros((70, 70), bool)
+    rr, cc = line(5, 5, 50, 50)
+    one[rr, cc] = True
+    assert len(extract_filaments(skeletonize(one), cfg)) == 1

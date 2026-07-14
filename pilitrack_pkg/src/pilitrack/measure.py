@@ -117,25 +117,175 @@ def _geodesic_length_px(coords: np.ndarray) -> float:
     return total
 
 
+def _neighbors8(y, x):
+    return [(y + dy, x + dx) for dy in (-1, 0, 1) for dx in (-1, 0, 1)
+            if not (dy == 0 and dx == 0)]
+
+
+def _connected_paths(pixel_set):
+    """8-connected components of a set of pixels, each ordered as a path."""
+    remaining = set(pixel_set)
+    out = []
+    while remaining:
+        seed = next(iter(remaining))
+        comp, stack = set(), [seed]
+        while stack:
+            p = stack.pop()
+            if p in comp:
+                continue
+            comp.add(p)
+            for nb in _neighbors8(*p):
+                if nb in remaining and nb not in comp:
+                    stack.append(nb)
+        remaining -= comp
+        ordered = _order_skeleton(np.array(sorted(comp)))
+        out.append([tuple(int(v) for v in p) for p in ordered] if ordered is not None
+                   else [tuple(int(v) for v in p) for p in comp])
+    return out
+
+
+def _pixel_clusters(pixel_set):
+    """8-connected clusters of pixels (unordered sets)."""
+    remaining = set(pixel_set)
+    out = []
+    while remaining:
+        seed = next(iter(remaining))
+        comp, stack = set(), [seed]
+        while stack:
+            p = stack.pop()
+            if p in comp:
+                continue
+            comp.add(p)
+            for nb in _neighbors8(*p):
+                if nb in remaining and nb not in comp:
+                    stack.append(nb)
+        remaining -= comp
+        out.append(comp)
+    return out
+
+
+def _seg_outward_dir(seg, end_idx):
+    """Unit direction pointing from a segment's ``end_idx`` end into the segment
+    (i.e. away from the junction the end touches)."""
+    pts = seg if end_idx == 0 else seg[::-1]
+    k = min(len(pts) - 1, 4)
+    if k <= 0:
+        return np.array([0.0, 0.0])
+    v = np.array(pts[k], float) - np.array(pts[0], float)
+    nrm = float(np.hypot(v[0], v[1]))
+    return v / nrm if nrm > 0 else np.array([0.0, 0.0])
+
+
+def _decompose_component(coords, max_junctions: int = 8):
+    """Split one skeleton component into through-paths, resolving crossings by
+    orientation continuity (SOAX/KnotResolver style): break the skeleton at
+    junction pixels, then re-join the two segments that pass most straight
+    through each junction (dot of outward directions most negative). Returns a
+    list of coordinate arrays, each a single filament. Simple (unbranched)
+    components are returned unchanged; hopeless blobs (many junctions) are
+    dropped by returning ``[]``."""
+    s = set(tuple(int(v) for v in p) for p in coords)
+    if len(s) < 2:
+        return [np.array(sorted(s))] if s else []
+    deg = {p: sum((nb in s) for nb in _neighbors8(*p)) for p in s}
+    junctions = {p for p in s if deg[p] >= 3}
+    if not junctions:
+        return [np.array(sorted(s))]
+    if len(junctions) > max_junctions:          # a blob, not filaments
+        return []
+
+    segments = _connected_paths(s - junctions)
+    parent = list(range(len(segments)))
+
+    def find(a):
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+
+    import itertools
+    used_end = set()
+    bridges = []                                # (si, sj, frozenset(cluster))
+    # a crossing skeletonizes to a small BLOCK of junction pixels, so pair arms
+    # per junction *cluster*, not per pixel (each pixel only touches one arm).
+    for cluster in _pixel_clusters(junctions):
+        ends, seen = [], set()
+        for si, seg in enumerate(segments):
+            for ei, ep in ((0, seg[0]), (1, seg[-1])):
+                if (si, ei) in seen:
+                    continue
+                if any(nb in cluster for nb in _neighbors8(*ep)):
+                    ends.append((si, ei, _seg_outward_dir(seg, ei)))
+                    seen.add((si, ei))
+        avail = [e for e in ends if (e[0], e[1]) not in used_end]
+        cand = sorted(
+            ((float(np.dot(a[2], b[2])), ia, ib)
+             for (ia, a), (ib, b) in itertools.combinations(enumerate(avail), 2)),
+            key=lambda t: t[0])
+        taken = set()
+        for dot, ia, ib in cand:
+            if ia in taken or ib in taken or dot > -0.2:   # not a straight pass-through
+                continue
+            taken.add(ia); taken.add(ib)
+            a, b = avail[ia], avail[ib]
+            used_end.add((a[0], a[1])); used_end.add((b[0], b[1]))
+            parent[find(a[0])] = find(b[0])
+            bridges.append((a[0], b[0], cluster))
+
+    groups = {}
+    for si, seg in enumerate(segments):
+        groups.setdefault(find(si), set()).update(seg)
+    for si, sj, cluster in bridges:
+        groups[find(si)].update(cluster)
+    # junction pixels never used in a pairing (e.g. a T-branch) attach to any
+    # touching group so they aren't lost
+    assigned = set().union(*groups.values()) if groups else set()
+    for j in junctions:
+        if j in assigned:
+            continue
+        for si, seg in enumerate(segments):
+            if any(j in _neighbors8(*ep) for ep in (seg[0], seg[-1])):
+                groups[find(si)].add(j)
+                break
+
+    return [np.array(sorted(g)) for g in groups.values() if len(g) >= 2]
+
+
 def extract_filaments(skeleton: np.ndarray, cfg: AcquisitionConfig) -> list[Filament]:
     lbl, n = filament_components(skeleton)
     out: list[Filament] = []
+    next_label = 1
     for i in range(1, n + 1):
         coords = np.argwhere(lbl == i)
         ends = _endpoints(coords)
-        # a real pilus skeleton is a simple path (2 endpoints); reject branchy
-        # blobs that would otherwise overcount length wildly
-        if len(ends) > cfg.max_branch_endpoints:
-            continue
-        length_px = _geodesic_length_px(coords)
-        length_nm = length_px * cfg.pixel_size_nm
-        if length_px < cfg.min_pilus_length_px or length_nm > cfg.max_pilus_length_nm:
-            continue
-        if len(ends) >= 2:
-            a, b = ends[0], ends[-1]
-        else:
-            a = b = tuple(coords[0])
-        out.append(Filament(i, length_px, a, b, coords))
+        s = set((int(p[0]), int(p[1])) for p in coords)
+        deg = {p: sum((nb in s) for nb in _neighbors8(*p)) for p in s}
+        jclusters = _pixel_clusters({p for p in s if deg[p] >= 3})
+
+        # Resolve genuine crossings (a few junction clusters, e.g. an X or T of
+        # pili) into separate through-paths. Very branchy components (rings /
+        # blobs) keep the original behavior: one filament if not too branchy,
+        # else dropped — so this only ADDS separation for clean crossings.
+        paths = []
+        if jclusters and len(jclusters) <= 2 and len(ends) <= 6:
+            paths = _decompose_component(coords)
+        if not paths:
+            paths = ([np.asarray(coords)]
+                     if (not jclusters or len(ends) <= cfg.max_branch_endpoints)
+                     else [])
+
+        for path in paths:
+            pends = _endpoints(path)
+            length_px = _geodesic_length_px(path)
+            length_nm = length_px * cfg.pixel_size_nm
+            if length_px < cfg.min_pilus_length_px or length_nm > cfg.max_pilus_length_nm:
+                continue
+            if len(pends) >= 2:
+                a, b = pends[0], pends[-1]
+            else:
+                a = b = tuple(int(v) for v in path[0])
+            out.append(Filament(next_label, length_px, a, b, path))
+            next_label += 1
     return out
 
 
