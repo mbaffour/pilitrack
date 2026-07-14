@@ -25,38 +25,6 @@ from pilitrack.qc import qc_metrics
 DEFAULT_MOVIE = str(Path(__file__).resolve().parents[3] / "Labelled data" / "trial01007.nd2")
 
 
-def _install_canvas_compat():
-    """Make ``streamlit-drawable-canvas`` work on modern Streamlit.
-
-    The canvas (0.9.x, the newest release) calls
-    ``streamlit.elements.image.image_to_url(image, width, clamp, channels, fmt, id)``.
-    Streamlit >=1.30 removed that function from that module (it moved to
-    ``elements.lib.image_utils`` and its signature changed), so every call raised
-    ``AttributeError: module 'streamlit.elements.image' has no attribute
-    'image_to_url'`` — which, because Streamlit runs *every* tab body on each
-    rerun, crashed the whole page. Restore a compatible function that just turns
-    the background image into a PNG data URI (no dependence on Streamlit's media
-    internals, so it survives future Streamlit changes)."""
-    import streamlit.elements.image as st_image
-    if hasattr(st_image, "image_to_url"):
-        return
-    import io
-    import base64
-    from PIL import Image
-
-    def image_to_url(image, width=None, clamp=False, channels="RGB",
-                     output_format="PNG", image_id=""):
-        if not isinstance(image, Image.Image):
-            image = Image.fromarray(np.asarray(image))
-        if image.mode not in ("RGB", "RGBA", "L"):
-            image = image.convert("RGB")
-        buf = io.BytesIO()
-        image.save(buf, format="PNG")
-        return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
-
-    st_image.image_to_url = image_to_url
-
-
 def analyze_for_web(path, *, detect_threshold=None, fast=True, frames=None,
                     roi=None, pili_channel=None, cell_channel=None,
                     model=None, downsample=1) -> dict:
@@ -128,21 +96,50 @@ def overlay_rgb(fluor_frame, cell_labels, filaments) -> np.ndarray:
     return (np.clip(rgb, 0, 1) * 255).astype(np.uint8)
 
 
-def _canvas_paths_to_manual(objects, scale_y, scale_x, frame):
-    """Drawable-canvas freedraw objects -> ManualPilus list in image coords."""
-    from pilitrack.annotate import ManualPilus
-    out = []
-    for obj in (objects or []):
-        if obj.get("type") != "path":
-            continue
-        pts = []
-        for cmd in obj.get("path", []):
-            if len(cmd) >= 3:                      # ["M"/"Q"/"L", ..., x, y]
-                x, y = float(cmd[-2]), float(cmd[-1])
-                pts.append([round(y * scale_y, 1), round(x * scale_x, 1)])
-        if len(pts) >= 2:
-            out.append(ManualPilus(frame=int(frame), points=pts))
-    return out
+def _click_to_image_yx(val, Himg, Wimg):
+    """Map a ``streamlit-image-coordinates`` click to full-resolution image
+    coordinates ``[y, x]``.
+
+    ``val`` is the component's return dict ``{x, y, width, height, ...}`` where
+    ``x, y`` are in *displayed* pixels and ``width, height`` are the displayed
+    image size — so the click scales back to the real image regardless of how it
+    was resized for display. Returns ``None`` for a non-point payload.
+    """
+    if not val or "x" not in val or "y" not in val:
+        return None
+    dw = float(val.get("width") or Wimg) or Wimg
+    dh = float(val.get("height") or Himg) or Himg
+    y = min(max(float(val["y"]) * Himg / dh, 0.0), Himg - 1)
+    x = min(max(float(val["x"]) * Wimg / dw, 0.0), Wimg - 1)
+    return [round(y, 1), round(x, 1)]
+
+
+def _draw_labels(bg, committed, wip, disp_w):
+    """Render the labeling canvas: the frame overlay ``bg`` (H×W×3 uint8) resized
+    to ``disp_w`` wide, with finished manual pili (``committed``: list of ``[y,x]``
+    polylines) drawn in yellow and the in-progress points (``wip``: ``[y,x]``) in
+    orange. Returns ``(PIL image, disp_h)``."""
+    from PIL import Image, ImageDraw
+
+    Himg, Wimg = bg.shape[:2]
+    disp_h = max(1, int(disp_w * Himg / Wimg))
+    im = Image.fromarray(bg).resize((disp_w, disp_h))
+    draw = ImageDraw.Draw(im)
+    sx, sy = disp_w / Wimg, disp_h / Himg
+
+    def D(pt):
+        return (pt[1] * sx, pt[0] * sy)          # [y, x] -> (x_disp, y_disp)
+
+    for poly in committed:
+        if len(poly) >= 2:
+            draw.line([D(p) for p in poly], fill=(255, 230, 0), width=2)
+    if wip:
+        if len(wip) >= 2:
+            draw.line([D(p) for p in wip], fill=(255, 140, 0), width=2)
+        for p in wip:
+            x, y = D(p)
+            draw.ellipse([x - 3, y - 3, x + 3, y + 3], fill=(255, 140, 0))
+    return im, disp_h
 
 
 def _measurements(res, qc) -> dict:
@@ -291,36 +288,64 @@ def main():
 
     with t_label:
         try:
-            from streamlit_drawable_canvas import st_canvas
-            _install_canvas_compat()   # bridge canvas 0.9.x <-> modern Streamlit
+            from streamlit_image_coordinates import streamlit_image_coordinates as st_coords
         except Exception:
-            st.info("In-browser drawing needs `pip install streamlit-drawable-canvas`. "
-                    "(Or use the desktop app `pilitrack-gui` for full correction.)")
+            st.info("In-browser labeling needs `streamlit-image-coordinates` "
+                    "(`pip install streamlit-image-coordinates`, or "
+                    "`pip install -e '.[web]'`). The desktop app `pilitrack-gui` "
+                    "also does full labeling.")
         else:
-            from PIL import Image
             from pilitrack.annotate import (annotations_from_art, annotations_to_dict,
-                                            Annotations)
+                                            Annotations, ManualPilus)
             from pilitrack.dataset import save_training_bundle
-            store = st.session_state.setdefault("drawn_pili", {})
+            store = st.session_state.setdefault("manual_pili", {})   # frame -> [ManualPilus]
+            wips = st.session_state.setdefault("wip_points", {})     # frame -> [[y,x]]
             T = art["n_frames"]
             lf = st.slider("Frame to label", 0, T - 1, 0, key="label_frame") if T > 1 else 0
+            wip = wips.setdefault(lf, [])
+            committed = [mp.points for mp in store.get(lf, [])]
+
             bg = overlay_rgb(fluor[lf], art["per_frame_cell_labels"][lf],
                              art["per_frame_filaments"][lf])
             Himg, Wimg = bg.shape[:2]
-            disp_w = 512
-            disp_h = int(disp_w * Himg / Wimg)
-            st.caption("Magenta = already detected. Click-drag along any pilus the "
-                       "detector MISSED. Detections + your traces are saved as labels.")
-            canvas = st_canvas(
-                background_image=Image.fromarray(bg).resize((disp_w, disp_h)),
-                drawing_mode="freedraw", stroke_width=2, stroke_color="#ffe600",
-                height=disp_h, width=disp_w, key=f"cv_{lf}")
-            if canvas.json_data is not None:
-                store[lf] = _canvas_paths_to_manual(
-                    canvas.json_data.get("objects"), Himg / disp_h, Wimg / disp_w, lf)
+            disp_w = min(700, Wimg * 2) or 512
+            st.caption("Magenta = already detected. **Click along a pilus the detector "
+                       "MISSED** — point by point, base to tip — then press **Finish "
+                       "pilus**. Yellow = finished, orange = in progress.")
+            pil, _ = _draw_labels(bg, committed, wip, disp_w)
+            val = st_coords(pil, width=disp_w, key=f"coords_{lf}", cursor="crosshair")
+
+            # only act on a genuinely new click (the component re-returns its last
+            # value on every rerun, so de-dupe by the click's timestamp/position)
+            if val:
+                stamp = (lf, val.get("unix_time"), val.get("x"), val.get("y"))
+                if st.session_state.get("_last_click") != stamp:
+                    st.session_state["_last_click"] = stamp
+                    yx = _click_to_image_yx(val, Himg, Wimg)
+                    if yx is not None:
+                        wip.append(yx)
+                        st.rerun()
+
+            c1, c2, c3 = st.columns(3)
+            if c1.button(f"✓ Finish pilus ({len(wip)} pts)", disabled=len(wip) < 2,
+                         width="stretch"):
+                store.setdefault(lf, []).append(
+                    ManualPilus(frame=int(lf), points=[list(p) for p in wip]))
+                wips[lf] = []
+                st.rerun()
+            if c2.button("↶ Undo point", disabled=not wip, width="stretch"):
+                wip.pop()
+                st.rerun()
+            if c3.button("🗑 Clear frame", disabled=not (wip or store.get(lf)),
+                         width="stretch"):
+                wips[lf] = []
+                store[lf] = []
+                st.rerun()
+
             added = [mp for v in store.values() for mp in v]
-            st.write(f"**{len(store.get(lf, []))}** trace(s) on this frame · "
-                     f"**{len(added)}** across all frames you've labelled.")
+            st.write(f"**{len(store.get(lf, []))}** finished pilus(i) on this frame · "
+                     f"**{len(wip)}** point(s) in progress · "
+                     f"**{len(added)}** pili across all frames.")
 
             movie_path = result["meta"].get("path")
             stem = Path(movie_path).stem if movie_path and movie_path != "<array>" else "labels"

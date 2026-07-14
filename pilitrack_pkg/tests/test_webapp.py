@@ -5,7 +5,7 @@ import pytest
 from scipy.ndimage import gaussian_filter
 
 from pilitrack.webapp import (overlay_rgb, _measurements, analyze_for_web,
-                              _canvas_paths_to_manual)
+                              _click_to_image_yx, _draw_labels)
 from pilitrack.measure import Filament
 
 
@@ -35,20 +35,26 @@ def test_measurements_summary():
     assert m["median_ext_nm_s"] == "300"
 
 
-def test_canvas_paths_to_manual_scales_and_orders():
-    # a drawable-canvas freedraw object (SVG path cmds) on a 512-display over 1024 px
-    objs = [{"type": "path", "path": [["M", 10, 20], ["Q", 12, 22, 15, 25],
-                                      ["L", 30, 40]]}]
-    mp = _canvas_paths_to_manual(objs, scale_y=2.0, scale_x=2.0, frame=3)
-    assert len(mp) == 1 and mp[0].frame == 3
-    # canvas (x,y) -> image (y,x), scaled: (10,20)->[40,20], (30,40)->[80,60]
-    assert mp[0].points[0] == [40.0, 20.0]
-    assert mp[0].points[-1] == [80.0, 60.0]
+def test_click_to_image_yx_scales_from_display_to_full():
+    # click at display (x=100, y=50) on a 500x250 shown image over a 1000x500 crop
+    val = {"x": 100, "y": 50, "width": 500, "height": 250, "unix_time": 1}
+    yx = _click_to_image_yx(val, Himg=500, Wimg=1000)   # (Himg, Wimg) full-res
+    assert yx == [100.0, 200.0]                          # [y*2, x*2]
 
 
-def test_canvas_paths_ignores_non_paths_and_short():
-    objs = [{"type": "rect"}, {"type": "path", "path": [["M", 1, 1]]}]  # too short
-    assert _canvas_paths_to_manual(objs, 1.0, 1.0, 0) == []
+def test_click_to_image_yx_clamps_and_rejects_empty():
+    assert _click_to_image_yx({}, 100, 100) is None
+    # out-of-image click is clamped into bounds
+    yx = _click_to_image_yx({"x": 999, "y": -5, "width": 100, "height": 100}, 100, 100)
+    assert yx == [0.0, 99.0]
+
+
+def test_draw_labels_returns_display_sized_image():
+    bg = np.zeros((100, 200, 3), np.uint8)
+    committed = [[[10, 20], [30, 40]]]
+    wip = [[50, 60], [55, 65]]
+    im, disp_h = _draw_labels(bg, committed, wip, disp_w=100)
+    assert im.size == (100, disp_h) and disp_h == 50   # aspect preserved (200x100 -> 100x50)
 
 
 def test_analyze_for_web_on_tiff(tmp_path):
@@ -72,25 +78,6 @@ def test_analyze_for_web_on_tiff(tmp_path):
     assert {"fluor", "cfg", "art", "res", "qc", "meta"} <= set(r)
     assert r["fluor"].shape[0] == 6
     assert "flags" in r["qc"]
-
-
-def test_install_canvas_compat_restores_image_to_url():
-    # Streamlit >=1.30 removed streamlit.elements.image.image_to_url, which
-    # crashed the Label (draw) tab. The shim must put a working one back.
-    import streamlit.elements.image as st_image
-    from pilitrack.webapp import _install_canvas_compat
-    saved = getattr(st_image, "image_to_url", None)
-    try:
-        if hasattr(st_image, "image_to_url"):
-            del st_image.image_to_url          # force the broken state
-        _install_canvas_compat()
-        assert hasattr(st_image, "image_to_url")
-        url = st_image.image_to_url(np.zeros((4, 4, 3), np.uint8),
-                                    4, True, "RGB", "PNG", "id")
-        assert url.startswith("data:image/png;base64,")
-    finally:
-        if saved is not None:
-            st_image.image_to_url = saved
 
 
 def test_analyze_for_web_downsample_halves_and_rescales(tmp_path):
