@@ -103,6 +103,22 @@ def overlay_rgb(fluor_frame, cell_labels, filaments) -> np.ndarray:
     return (np.clip(rgb, 0, 1) * 255).astype(np.uint8)
 
 
+def _frame_stats(art, cfg, fr) -> dict:
+    """Per-frame biology readout: how many pili/cells are detected in frame
+    ``fr`` and their lengths in µm. Pure (no Streamlit) so it can be unit-tested."""
+    fils = art["per_frame_filaments"][fr]
+    lengths_um = sorted(float(f.length_px) * cfg.pixel_size_nm / 1000.0 for f in fils)
+    cells = art["per_frame_cell_labels"][fr]
+    n_cells = int(np.asarray(cells).max()) if cells is not None and np.asarray(cells).size else 0
+    return {
+        "frame": int(fr),
+        "n_pili": len(fils),
+        "n_cells": n_cells,
+        "lengths_um": lengths_um,
+        "mean_length_um": float(np.mean(lengths_um)) if lengths_um else 0.0,
+    }
+
+
 def _click_to_image_yx(val, Himg, Wimg):
     """Map a ``streamlit-image-coordinates`` click to full-resolution image
     coordinates ``[y, x]``.
@@ -306,6 +322,16 @@ def main():
                           art["per_frame_filaments"][fr])
         st.image(rgb, caption=f"Frame {fr} · green = cells, cyan = outline, magenta = pili",
                  width="stretch")
+        # per-frame biology readout so you can step through the analysis frame by
+        # frame and see what was measured, not just a picture
+        sfr = _frame_stats(art, cfg, fr)
+        s1, s2, s3 = st.columns(3)
+        s1.metric("Pili this frame", sfr["n_pili"])
+        s2.metric("Cells this frame", sfr["n_cells"])
+        s3.metric("Mean length", f"{sfr['mean_length_um']:.2f} µm")
+        if sfr["lengths_um"]:
+            st.caption("Lengths (µm): "
+                       + ", ".join(f"{v:.2f}" for v in sfr["lengths_um"]))
 
     with t_label:
         try:

@@ -5,8 +5,30 @@ import pytest
 from scipy.ndimage import gaussian_filter
 
 from pilitrack.webapp import (overlay_rgb, _measurements, analyze_for_web,
-                              _click_to_image_yx, _draw_labels)
+                              _click_to_image_yx, _draw_labels, _frame_stats)
 from pilitrack.measure import Filament
+
+
+def _fake_art(per_frame_lengths_px):
+    """A minimal detect_and_link 'art' with one filament per frame of the given
+    length, for testing the per-frame readout deterministically."""
+    fils = [[Filament(1, L, (5, 5), (5, 5 + int(L)),
+                      np.array([[5, 5 + k] for k in range(max(2, int(L)))]))]
+            for L in per_frame_lengths_px]
+    cells = [np.ones((12, 12), int) for _ in per_frame_lengths_px]
+    return {"per_frame_filaments": fils, "per_frame_cell_labels": cells,
+            "n_frames": len(per_frame_lengths_px)}
+
+
+def test_frame_stats_reads_per_frame_measurements():
+    from pilitrack.config import AcquisitionConfig
+    cfg = AcquisitionConfig(dt_s=0.4, pixel_size_nm=100.0)   # 1 px = 0.1 µm
+    art = _fake_art([5.0, 10.0, 20.0])                        # a growing pilus
+    s0 = _frame_stats(art, cfg, 0)
+    s2 = _frame_stats(art, cfg, 2)
+    assert s0["n_pili"] == 1 and s0["n_cells"] == 1
+    assert s0["mean_length_um"] == pytest.approx(0.5)         # 5 px * 0.1 µm
+    assert s2["mean_length_um"] == pytest.approx(2.0)         # frame-by-frame differs
 
 
 def test_overlay_rgb_marks_pili_magenta():
@@ -78,6 +100,30 @@ def test_analyze_for_web_on_tiff(tmp_path):
     assert {"fluor", "cfg", "art", "res", "qc", "meta"} <= set(r)
     assert r["fluor"].shape[0] == 6
     assert "flags" in r["qc"]
+
+
+def test_frame_by_frame_measurements_vary_over_a_generated_movie(tmp_path):
+    """End-to-end: a generated movie with an extending/retracting pilus must
+    yield per-frame measurements that CHANGE frame to frame (real frame-by-frame
+    analysis, not a static readout)."""
+    tifffile = pytest.importorskip("tifffile")
+    from pilitrack.config import AcquisitionConfig
+    from pilitrack.synth import make_movie
+    cfg = AcquisitionConfig(dt_s=0.4, pixel_size_nm=65.0)
+    mv = make_movie(cfg, n_cells=1, shape=(96, 96), piliated_fraction=1.0,
+                    max_length_nm=1500.0, n_cycles=1, v_ext_nm_s=500.0,
+                    v_ret_nm_s=500.0, dwell_s=0.8, rest_s=0.8, seed=3)
+    p = tmp_path / "grow.ome.tif"
+    tifffile.imwrite(str(p), mv.stack.astype(np.uint16), metadata={
+        "axes": "TYX", "PhysicalSizeX": 0.065, "PhysicalSizeXUnit": "µm",
+        "TimeIncrement": 0.4})
+    r = analyze_for_web(str(p), detect_threshold=0.30, fast=False)
+    art, ccfg = r["art"], r["cfg"]
+    lengths = [_frame_stats(art, ccfg, t)["mean_length_um"]
+               for t in range(art["n_frames"])]
+    assert art["n_frames"] >= 4
+    assert max(lengths) > 0                      # a pilus was measured
+    assert max(lengths) - min(lengths) > 0.05    # and its length changed over time
 
 
 def test_analyze_for_web_downsample_halves_and_rescales(tmp_path):
