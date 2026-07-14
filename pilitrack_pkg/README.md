@@ -54,7 +54,7 @@ folder, or run a command:
 
 | Way | How | Best for |
 |---|---|---|
-| **Browser** | `pilitrack-web` &nbsp;·&nbsp; or double-click **Start pilitrack (browser)** | easiest; no Qt. Runs a small **local** server, opens in your browser, data stays on your machine. Pick/upload a movie, Analyze, view overlays, download CSVs. |
+| **Browser** | `pilitrack-web` &nbsp;·&nbsp; or double-click **Start pilitrack (browser)** | easiest; no Qt. Runs a small **local** server, opens in your browser, data stays on your machine. Pick/upload a movie, Analyze, **draw missed pili** (Label tab), download CSVs / save training bundles. |
 | **Desktop** | `pilitrack-gui` &nbsp;·&nbsp; or **Start pilitrack (desktop)** | full **hand-labeling** (trace missed pili, paint cells) in a napari window. |
 | **Scripts / batch** | `pilitrack-batch`, `pilitrack-validate`, `examples/*.py` | folders of movies, validation, automation. |
 

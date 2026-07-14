@@ -4,7 +4,8 @@ import pandas as pd
 import pytest
 from scipy.ndimage import gaussian_filter
 
-from pilitrack.webapp import overlay_rgb, _measurements, analyze_for_web
+from pilitrack.webapp import (overlay_rgb, _measurements, analyze_for_web,
+                              _canvas_paths_to_manual)
 from pilitrack.measure import Filament
 
 
@@ -32,6 +33,22 @@ def test_measurements_summary():
     assert m["percent_piliated"] == "60%"
     assert m["pili_per_cell"] == "2.0"
     assert m["median_ext_nm_s"] == "300"
+
+
+def test_canvas_paths_to_manual_scales_and_orders():
+    # a drawable-canvas freedraw object (SVG path cmds) on a 512-display over 1024 px
+    objs = [{"type": "path", "path": [["M", 10, 20], ["Q", 12, 22, 15, 25],
+                                      ["L", 30, 40]]}]
+    mp = _canvas_paths_to_manual(objs, scale_y=2.0, scale_x=2.0, frame=3)
+    assert len(mp) == 1 and mp[0].frame == 3
+    # canvas (x,y) -> image (y,x), scaled: (10,20)->[40,20], (30,40)->[80,60]
+    assert mp[0].points[0] == [40.0, 20.0]
+    assert mp[0].points[-1] == [80.0, 60.0]
+
+
+def test_canvas_paths_ignores_non_paths_and_short():
+    objs = [{"type": "rect"}, {"type": "path", "path": [["M", 1, 1]]}]  # too short
+    assert _canvas_paths_to_manual(objs, 1.0, 1.0, 0) == []
 
 
 def test_analyze_for_web_on_tiff(tmp_path):

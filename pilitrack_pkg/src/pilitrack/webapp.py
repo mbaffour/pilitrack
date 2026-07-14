@@ -79,6 +79,23 @@ def overlay_rgb(fluor_frame, cell_labels, filaments) -> np.ndarray:
     return (np.clip(rgb, 0, 1) * 255).astype(np.uint8)
 
 
+def _canvas_paths_to_manual(objects, scale_y, scale_x, frame):
+    """Drawable-canvas freedraw objects -> ManualPilus list in image coords."""
+    from pilitrack.annotate import ManualPilus
+    out = []
+    for obj in (objects or []):
+        if obj.get("type") != "path":
+            continue
+        pts = []
+        for cmd in obj.get("path", []):
+            if len(cmd) >= 3:                      # ["M"/"Q"/"L", ..., x, y]
+                x, y = float(cmd[-2]), float(cmd[-1])
+                pts.append([round(y * scale_y, 1), round(x * scale_x, 1)])
+        if len(pts) >= 2:
+            out.append(ManualPilus(frame=int(frame), points=pts))
+    return out
+
+
 def _measurements(res, qc) -> dict:
     pop = res["population"]
     cells = res["cell"]
@@ -194,7 +211,8 @@ def main():
     for f in qc["flags"]:
         st.warning("⚠ " + f)
 
-    t_over, t_fig, t_data = st.tabs(["Frames", "Distributions", "Data & downloads"])
+    t_over, t_label, t_fig, t_data = st.tabs(
+        ["Frames", "Label (draw)", "Distributions", "Data & downloads"])
 
     with t_over:
         T = art["n_frames"]
@@ -203,6 +221,57 @@ def main():
                           art["per_frame_filaments"][fr])
         st.image(rgb, caption=f"Frame {fr} · green = cells, cyan = outline, magenta = pili",
                  use_container_width=True)
+
+    with t_label:
+        try:
+            from streamlit_drawable_canvas import st_canvas
+        except Exception:
+            st.info("In-browser drawing needs `pip install streamlit-drawable-canvas`. "
+                    "(Or use the desktop app `pilitrack-gui` for full correction.)")
+        else:
+            from PIL import Image
+            from pilitrack.annotate import (annotations_from_art, annotations_to_dict,
+                                            Annotations)
+            from pilitrack.dataset import save_training_bundle
+            store = st.session_state.setdefault("drawn_pili", {})
+            T = art["n_frames"]
+            lf = st.slider("Frame to label", 0, T - 1, 0, key="label_frame") if T > 1 else 0
+            bg = overlay_rgb(fluor[lf], art["per_frame_cell_labels"][lf],
+                             art["per_frame_filaments"][lf])
+            Himg, Wimg = bg.shape[:2]
+            disp_w = 512
+            disp_h = int(disp_w * Himg / Wimg)
+            st.caption("Magenta = already detected. Click-drag along any pilus the "
+                       "detector MISSED. Detections + your traces are saved as labels.")
+            canvas = st_canvas(
+                background_image=Image.fromarray(bg).resize((disp_w, disp_h)),
+                drawing_mode="freedraw", stroke_width=2, stroke_color="#ffe600",
+                height=disp_h, width=disp_w, key=f"cv_{lf}")
+            if canvas.json_data is not None:
+                store[lf] = _canvas_paths_to_manual(
+                    canvas.json_data.get("objects"), Himg / disp_h, Wimg / disp_w, lf)
+            added = [mp for v in store.values() for mp in v]
+            st.write(f"**{len(store.get(lf, []))}** trace(s) on this frame · "
+                     f"**{len(added)}** across all frames you've labelled.")
+
+            movie_path = result["meta"].get("path")
+            stem = Path(movie_path).stem if movie_path and movie_path != "<array>" else "labels"
+            outdir = st.text_input("Save training bundle to folder", value=f"training/{stem}")
+            a, b = st.columns(2)
+            if a.button("💾 Save labels for training", type="primary"):
+                ann = annotations_from_art(art)          # detections as labels
+                ann.manual_pili += added                 # + your added traces
+                ann.movie = movie_path
+                meta = save_training_bundle(
+                    outdir, stack=fluor, annotations=ann, cfg=cfg, movie_path=movie_path,
+                    cell_labels=np.stack(art["per_frame_cell_labels"]))
+                st.success(f"Saved {len(meta.get('labeled_frames') or [])} frames, "
+                           f"{len(ann.manual_pili)} pili → {outdir}")
+            b.download_button(
+                "⬇ Download my traces (JSON)",
+                json.dumps(annotations_to_dict(
+                    Annotations(manual_pili=added, movie=movie_path)), indent=2),
+                "my_traces.json", "application/json")
 
     with t_fig:
         try:
