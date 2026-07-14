@@ -1,0 +1,9 @@
+# Full pip install (no conda). From this folder, in a fresh env:
+#   python -m venv .venv
+#   .venv\Scripts\activate         (Windows)   |   source .venv/bin/activate  (Mac/Linux)
+#   pip install -r requirements.txt
+#
+# This one editable line pulls the package plus everything to run the full tool
+# (ND2/TIFF readers, browser app, desktop GUI). For Zeiss CZI add: pip install czifile
+# For instance segmentation of touching cells add: pip install cellpose
+-e ./pilitrack_pkg[all]

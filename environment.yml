@@ -1,0 +1,20 @@
+# Reproducible full environment for pilitrack (conda / Miniconda).
+# From this folder:   conda env create -f environment.yml
+# Then:               conda activate pilitrack
+# Then double-click "Start pilitrack (browser)" or run:  pilitrack-web
+name: pilitrack
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  # heavy scientific stack via conda (more reliable builds than pip)
+  - numpy
+  - scipy
+  - scikit-image
+  - pandas
+  - matplotlib
+  - pip:
+      # the package (editable) + everything to run the full tool (readers,
+      # browser app, desktop GUI). Heavy ML backends stay optional — see README.
+      - "-e ./pilitrack_pkg[all]"

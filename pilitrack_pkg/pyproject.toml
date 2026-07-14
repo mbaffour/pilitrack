@@ -26,14 +26,22 @@ pilitrack-web = "pilitrack.web_launch:main"
 dev = ["pytest>=7"]
 io = ["nd2>=0.10", "tifffile>=2023.7"]  # read real ND2 (and TIFF) movies
 czi = ["czifile"]                       # read Zeiss CZI (or install aicsimageio)
-qc = ["matplotlib>=3.7"]                # QC overlay PNGs
+qc = ["matplotlib>=3.7"]                # QC overlay PNGs + figures
 web = ["streamlit>=1.30", "matplotlib>=3.7"]  # browser app (pilitrack-web)
+viewer = ["napari[all]>=0.5", "magicgui>=0.7"]  # desktop GUI + hand-labeling
 yaml = ["pyyaml"]                       # optional YAML config files
-# Optional detection backends (neither is a hard dependency):
-omnipose = ["omnipose"]        # deep-learning cell instance segmentation
+# Optional detection backends (heavy / not hard dependencies):
+cellpose = ["cellpose"]        # deep-learning cell instance segmentation (recommended)
+omnipose = ["omnipose"]        # alternative instance segmentation
 ilastik = ["h5py"]             # read ilastik headless probability exports
-viewer = ["napari[all]", "magicgui"]  # interactive curation viewer
 #   (ilastik itself is a standalone app from ilastik.org, not a pip package)
+# EVERYTHING needed to run the full tool on real data (both GUIs). Heavy ML
+# backends (cellpose/omnipose) stay separate — add them if you need instance
+# segmentation of touching cells.
+all = [
+    "nd2>=0.10", "tifffile>=2023.7", "matplotlib>=3.7",
+    "streamlit>=1.30", "napari[all]>=0.5", "magicgui>=0.7", "pytest>=7",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

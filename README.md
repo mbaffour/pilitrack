@@ -3,6 +3,9 @@
 Quantify **type IV pili dynamics** in *Pseudomonas* (or any T4P system) from
 labelled two-channel time-lapse microscopy.
 
+> **New here / setting up a lab computer?** See **[SETUP.md](SETUP.md)** — install
+> Miniconda, double-click **Install pilitrack**, then **Start pilitrack (browser)**.
+
 Assumes pili are **fluorescently labelled** — e.g. a PilA cysteine knock-in
 (PilA-A86C in *P. aeruginosa*) tagged with a thiol-reactive maleimide dye such
 as Alexa488-mal — imaged alongside a cell-body channel (phase or membrane
