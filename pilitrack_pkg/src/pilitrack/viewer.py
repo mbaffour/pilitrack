@@ -267,10 +267,26 @@ def launch_annotator(fluor_stack: np.ndarray, cell_stack: np.ndarray,
         napari.utils.notifications.show_info(
             f"Wrote {len(paths)} figures to {directory}")
 
+    @magicgui(call_button="Save for training", directory={"mode": "d"})
+    def save_training(directory=".") -> None:
+        from pathlib import Path
+        from . import dataset as _dataset
+        _recompute()
+        ann = state["annotations"]
+        frames = sorted({int(mp.frame) for mp in ann.manual_pili}) or None
+        name = Path(movie_path).stem if movie_path else "labels"
+        meta = _dataset.save_training_bundle(
+            Path(directory) / name, stack=fluor_stack, annotations=ann, cfg=cfg,
+            movie_path=movie_path,
+            cell_labels=np.asarray(cells_layer.data), frames=frames)
+        napari.utils.notifications.show_info(
+            f"Saved training bundle ({len(meta.get('labeled_frames') or [])} "
+            f"frames) to {directory}")
+
     viewer.window.add_dock_widget(results_label, name="results", area="right")
     for w, name in [(recompute, "recompute"), (cull, "fix tracks"),
                     (save, "save"), (load, "load"), (export, "CSVs"),
-                    (figs, "figures")]:
+                    (figs, "figures"), (save_training, "save for training")]:
         viewer.window.add_dock_widget(w, name=name, area="right")
     viewer._pilitrack_state = state
     return viewer

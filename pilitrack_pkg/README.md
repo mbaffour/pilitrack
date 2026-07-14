@@ -43,7 +43,7 @@ two-channel stack
 pip install -e .            # core (numpy, scipy, scikit-image, pandas)
 pip install -e ".[dev]"     # + pytest
 pip install -e ".[io,qc]"   # + nd2/tifffile reader and matplotlib QC (for real movies)
-pytest                      # 96 tests
+pytest                      # 101 tests
 python examples/run_synthetic.py
 ```
 
@@ -228,6 +228,25 @@ writes the corrected tables. Runs on a laptop — for large movies work on a cro
 available. Install with `pip install "pilitrack[viewer]"` (napari + magicgui + a
 Qt backend); the annotation *logic* (`pilitrack.annotate`) is display-free and
 unit-tested, so the science is verified even though the window needs a screen.
+
+## Labeling → training data
+
+Hand labels aren't just for correcting one movie — they're the seed corpus for a
+better detector. The GUI's **Save for training** button (or
+`dataset.save_training_bundle`) writes a self-contained, ML-ready **bundle** per
+movie: `images/` + `pili_masks/` + `cell_masks/` (image↔mask pairs) plus
+`annotations.json` (vector traces) and `metadata.json` (movie SHA-256, pixel
+size, dt, ROI, labelled frames, versions). Collect many into a training set:
+
+```python
+from pilitrack.dataset import collect_dataset, dataset_summary
+df = collect_dataset("training/")   # one row per labelled frame: image, pili_mask,
+                                    # cell_mask, movie, frame, pixel_size_nm, sha256
+```
+
+Each row is an `(image, mask)` pair with the provenance to keep splits honest
+(never straddle train/test with two frames of the same movie). See
+[MAP.md](../MAP.md) for the full layout.
 
 ## Validation against ground truth & figures (for publication)
 

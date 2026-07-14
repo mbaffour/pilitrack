@@ -5,6 +5,7 @@ labelled two-channel time-lapse microscopy.
 
 > **New here / setting up a lab computer?** See **[SETUP.md](SETUP.md)** — install
 > Miniconda, double-click **Install pilitrack**, then **Start pilitrack (browser)**.
+> **Where is everything?** See **[MAP.md](MAP.md)**.
 
 Assumes pili are **fluorescently labelled** — e.g. a PilA cysteine knock-in
 (PilA-A86C in *P. aeruginosa*) tagged with a thiol-reactive maleimide dye such

@@ -45,6 +45,25 @@ class Annotations:
     removed_track_ids: list = field(default_factory=list)
     movie: str | None = None
     notes: str = ""
+    # provenance so a label can be tied back to the exact pixels it describes
+    # (movie hash, pixel size, dt, ROI, which frames are fully labeled, versions)
+    meta: dict = field(default_factory=dict)
+
+
+def pili_mask(annotations: "Annotations", frame: int, shape, width_px: int = 3) -> np.ndarray:
+    """Binary pilus mask for one frame: every trace on that frame rasterized and
+    dilated to ~pilus width. This is the pixel target an ML detector trains on."""
+    m = np.zeros(shape, dtype=bool)
+    for mp in annotations.manual_pili:
+        if int(mp.frame) != int(frame) or len(mp.points) < 2:
+            continue
+        coords = rasterize_polyline(mp.points, shape)
+        if coords.size:
+            m[coords[:, 0], coords[:, 1]] = True
+    if width_px and width_px > 1:
+        import scipy.ndimage as ndi
+        m = ndi.binary_dilation(m, iterations=int(width_px) // 2)
+    return m
 
 
 # --------------------------------------------------------------------------- #
@@ -175,6 +194,7 @@ def annotations_to_dict(ann: Annotations) -> dict:
     return {
         "movie": ann.movie,
         "notes": ann.notes,
+        "meta": dict(ann.meta),
         "removed_track_ids": list(ann.removed_track_ids),
         "manual_pili": [asdict(mp) if isinstance(mp, ManualPilus)
                         else dict(mp) for mp in ann.manual_pili],
@@ -187,7 +207,8 @@ def annotations_from_dict(d: dict) -> Annotations:
             for mp in d.get("manual_pili", [])]
     return Annotations(manual_pili=pili,
                        removed_track_ids=list(d.get("removed_track_ids", [])),
-                       movie=d.get("movie"), notes=d.get("notes", ""))
+                       movie=d.get("movie"), notes=d.get("notes", ""),
+                       meta=dict(d.get("meta", {})))
 
 
 def save_annotations(ann: Annotations, path, cell_labels=None) -> str:
