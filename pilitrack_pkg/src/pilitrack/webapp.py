@@ -27,7 +27,7 @@ DEFAULT_MOVIE = str(Path(__file__).resolve().parents[3] / "Labelled data" / "tri
 
 def analyze_for_web(path, *, detect_threshold=None, fast=True, frames=None,
                     roi=None, pili_channel=None, cell_channel=None,
-                    model=None, downsample=1) -> dict:
+                    model=None, downsample=1, organism=None) -> dict:
     """Load + analyze a movie for the web UI. Returns everything the page renders
     (fluor stack, cfg, detect_and_link art, summary, qc, meta). ``model`` (a
     trained detector or path) replaces the ridge filter when given.
@@ -77,7 +77,7 @@ def analyze_for_web(path, *, detect_threshold=None, fast=True, frames=None,
                           detect_fn=(None if prob is not None else det),
                           pilus_prob_stack=prob)
     res = summarize(art["tracks"], art["per_frame_cell_labels"], cfg, art["n_frames"])
-    qc = qc_metrics(fluor, art, res, cfg)
+    qc = qc_metrics(fluor, art, res, cfg, organism=organism)
     return {"fluor": fluor, "cfg": cfg, "art": art, "res": res, "qc": qc, "meta": meta}
 
 
@@ -225,6 +225,13 @@ def main():
         if det_choice.startswith("Trained model"):
             model_file = st.file_uploader("Trained model (.joblib)", type=["joblib"])
         st.header("Settings")
+        from pilitrack.qc import T4P_ENVELOPES, DEFAULT_ORGANISM
+        organism = st.selectbox(
+            "Organism (QC ranges)", list(T4P_ENVELOPES),
+            index=list(T4P_ENVELOPES).index(DEFAULT_ORGANISM),
+            help="Sets the biological sanity ranges QC flags against — Neisseria "
+                 "pili are longer/faster than P. aeruginosa, so pick your species "
+                 "to avoid false flags.")
         thr = st.slider("Detection threshold", 0.15, 0.60, 0.30, 0.05,
                         help="Higher = stricter (less noise, may miss faint pili)")
         fast = st.checkbox("Fast preview (center crop + first frames)", value=True,
@@ -272,7 +279,8 @@ def main():
         with st.spinner("Analyzing… (first run also loads the movie)"):
             try:
                 st.session_state["res"] = analyze_for_web(
-                    src, detect_threshold=thr, fast=fast, model=model, downsample=ds)
+                    src, detect_threshold=thr, fast=fast, model=model,
+                    downsample=ds, organism=organism)
                 # a fresh analysis -> drop hand traces tied to the previous movie
                 # so they can't leak into (and corrupt) this movie's labels
                 for k in ("manual_pili", "wip_points", "_last_click"):

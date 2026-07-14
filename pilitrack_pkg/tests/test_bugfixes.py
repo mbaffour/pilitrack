@@ -170,3 +170,20 @@ def test_qc_no_flags_when_clean():
          "n_implausible_length": 0, "n_implausible_velocity": 0,
          "n_negative_velocity": 0}
     assert qc_flags(m) == []
+
+
+def test_qc_organism_envelope_widens_ranges():
+    """A 20 um / 2200 nm/s pilus is implausible for P. aeruginosa but normal for
+    Neisseria — the organism envelope must change what QC flags."""
+    from pilitrack.qc import envelope_for, qc_flags
+    base = {"saturated_fraction": 0.0, "n_cells": 1, "detection_rate": 1.0,
+            "median_extension_velocity_nm_s": 2200.0,
+            "median_retraction_velocity_nm_s": 300.0,
+            "median_max_length_nm": 20000.0, "n_implausible_length": 0,
+            "n_implausible_velocity": 0, "n_negative_velocity": 0}
+    pa = dict(base)                                     # defaults -> P. aeruginosa
+    ng_env = envelope_for("N. gonorrhoeae")
+    ng = dict(base, sane_velocity_nm_s=ng_env["velocity_nm_s"],
+              sane_maxlen_nm=ng_env["maxlen_nm"])
+    assert any("length" in f for f in qc_flags(pa))     # flagged for P. aeruginosa
+    assert not any("length" in f for f in qc_flags(ng)) # fine for Neisseria
