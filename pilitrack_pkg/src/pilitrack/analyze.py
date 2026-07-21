@@ -151,6 +151,13 @@ def analyze_file(
                           pilus_prob_stack=prob)
     res = summarize(art["tracks"], art["per_frame_cell_labels"], cfg, art["n_frames"])
     qc = qc_metrics(fluor, art, res, cfg)
+    if art.get("failed_frames"):
+        bad = [f["frame"] for f in art["failed_frames"]]
+        qc.setdefault("flags", []).append(
+            f"{len(bad)} frame(s) failed and were skipped: {bad[:10]}"
+            f"{' ...' if len(bad) > 10 else ''} (see manifest.extra.failed_frames)")
+        if verbose:
+            print(f"  WARNING: {len(bad)} frame(s) failed: {bad[:10]}")
 
     outputs: list[str] = []
     manifest = None
@@ -178,7 +185,8 @@ def analyze_file(
             cfg=cfg, meta=meta, detection=detection, roi=roi, frames=frames,
             position=position, results_summary=res["population"], qc=qc,
             outputs=outputs, out_dir=out, hash_max_bytes=hash_max_bytes,
-            timestamp=timestamp)
+            timestamp=timestamp,
+            extra={"failed_frames": art.get("failed_frames") or []})
         provenance.write_manifest(manifest, out / "manifest.json")
         outputs.append(str(out / "manifest.json"))
         # verifiable results folder: `sha256sum -c checksums.sha256`

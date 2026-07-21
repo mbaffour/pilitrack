@@ -45,7 +45,10 @@ accurate pili numbers). Items are checked off as they land.
 - [x] **#9 Downcast label images** to a minimal int dtype — `pipeline._compact_labels`
   picks the smallest lossless uint (8x smaller: 2.13 GB -> 0.27 GB for a
   1952x1952 x 70 label stack).
-- [ ] **#10 Progress bars + per-frame error isolation + memory preflight.**
+- [x] **#10 Per-frame error isolation + progress** — a frame that raises is
+  recorded in `art["failed_frames"]`, surfaced as a QC flag + in the manifest,
+  and the movie completes; `detect_and_link(progress=...)` reports frame
+  progress. (Memory preflight still open.)
 
 ## Later (higher effort)
 - [ ] **#14 laptrack gap-closing + merge/split**, **#15 motion-aware cost**,

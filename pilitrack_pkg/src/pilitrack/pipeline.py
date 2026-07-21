@@ -52,6 +52,7 @@ def detect_and_link(
     detect_fn=None,
     cell_label_stack: np.ndarray | None = None,
     pilus_prob_stack: np.ndarray | None = None,
+    progress=None,
 ) -> dict:
     """Run detection + tracking and return intermediate artifacts.
 
@@ -60,6 +61,11 @@ def detect_and_link(
                ``segment_fn(frame, cfg)`` callable > built-in Otsu default.
       pili   : ``pilus_prob_stack`` (precomputed, e.g. ilastik probabilities) >
                ``detect_fn(frame, cfg)`` callable > built-in Sato ridge default.
+
+    ``progress(done, total)`` is called after each frame if given. A frame that
+    raises is *isolated*: it is recorded in the returned ``failed_frames`` and
+    contributes no pili, instead of aborting a long movie near the end. Failures
+    are surfaced (report + app), never silently swallowed.
     """
     T = fluor_stack.shape[0]
 
@@ -79,13 +85,21 @@ def detect_and_link(
 
     per_frame_filaments = []
     per_frame_cell_labels = []
+    failed_frames = []
     for t in range(T):
-        cells = _compact_labels(_cells(t))
-        skel = _skel(t)
-        fils = extract_filaments(skel, cfg)
-        fils = associate_to_cells(fils, cells, cfg)
+        try:
+            cells = _compact_labels(_cells(t))
+            skel = _skel(t)
+            fils = associate_to_cells(extract_filaments(skel, cfg), cells, cfg)
+        except Exception as exc:      # isolate the bad frame, keep the movie
+            failed_frames.append({"frame": int(t),
+                                  "error": f"{type(exc).__name__}: {exc}"})
+            cells = np.zeros(fluor_stack.shape[1:], np.uint8)
+            fils = []
         per_frame_filaments.append(fils)
         per_frame_cell_labels.append(cells)
+        if progress is not None:
+            progress(t + 1, T)
 
     tracks = link_tracks(per_frame_filaments, cfg)
     return {
@@ -94,6 +108,7 @@ def detect_and_link(
         "tracks": tracks,
         "n_frames": T,
         "shape": fluor_stack.shape[1:],
+        "failed_frames": failed_frames,
     }
 
 

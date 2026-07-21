@@ -292,3 +292,29 @@ def test_compact_labels_downcasts_losslessly():
         assert int(out.max()) == mx            # lossless
     assert _compact_labels(np.zeros((2, 2), bool)).dtype == bool
     assert _compact_labels(np.array([[-1, 2]])).dtype == np.int64   # left alone
+
+
+def test_one_bad_frame_does_not_abort_the_movie():
+    """A frame that raises must be isolated and REPORTED, not abort a long run."""
+    from pilitrack.pipeline import detect_and_link
+    from pilitrack.detect import detect_pili
+
+    cfg = AcquisitionConfig(dt_s=0.4, pixel_size_nm=65.0)
+    stack = (np.random.default_rng(0).random((5, 48, 48)) * 500).astype(np.uint16)
+    seen = []
+
+    def flaky(frame, c):
+        if len(seen) == 2:
+            seen.append(1)
+            raise RuntimeError("simulated bad frame")
+        seen.append(1)
+        return detect_pili(frame, c)
+
+    ticks = []
+    art = detect_and_link(stack, stack, cfg, detect_fn=flaky,
+                          progress=lambda d, t: ticks.append((d, t)))
+    assert art["n_frames"] == 5                       # movie completed
+    assert len(art["failed_frames"]) == 1
+    assert art["failed_frames"][0]["frame"] == 2
+    assert "simulated bad frame" in art["failed_frames"][0]["error"]
+    assert ticks[-1] == (5, 5)                        # progress reported
