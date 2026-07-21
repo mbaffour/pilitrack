@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+title: "pilitrack: reproducible quantification of type-IV pili dynamics"
+message: "If you use pilitrack in your research, please cite it."
+type: software
+authors:
+  - family-names: "Baffour Awuah"
+    given-names: "Michael"
+keywords:
+  - "type-IV pili"
+  - "T4P"
+  - "TIRF microscopy"
+  - "filament tracking"
+  - "microbiology"
+  - "bioimage analysis"
+license: MIT
+repository-code: "https://github.com/"
+abstract: >-
+  pilitrack quantifies type-IV pili (T4P) dynamics from fluorescence
+  microscopy time-lapses: per-pilus length, extension and retraction
+  velocity, number of piliated cells, and pili per cell. It provides
+  reproducible, provenance-tracked analysis (input and output checksums,
+  recorded software versions and numerical environment), a browser and a
+  desktop app, and a detect->correct->retrain labeling workflow.

@@ -118,9 +118,13 @@ def run_batch(
         "config_file": str(config_file) if config_file else None,
         "overrides": provenance._json_safe(overrides),
         "software": provenance.software_versions(),
+        "determinism": provenance.deterministic_state(),
         "outputs": outputs,
+        "output_checksums": provenance.fingerprint_outputs(outputs, base=out),
     }
     provenance.write_manifest(batch_manifest, out / "batch_manifest.json")
+    outputs.append(str(out / "batch_manifest.json"))
+    provenance.write_checksums(outputs, out / "checksums.sha256", base=out)
 
     if verbose:
         print(f"\n=== batch summary ({len(rows)} ok, {len(failures)} failed) ===")

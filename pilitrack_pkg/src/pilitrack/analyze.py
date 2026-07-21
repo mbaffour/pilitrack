@@ -174,9 +174,13 @@ def analyze_file(
             input_path=(path if array is None else "<array>"),
             cfg=cfg, meta=meta, detection=detection, roi=roi, frames=frames,
             position=position, results_summary=res["population"], qc=qc,
-            outputs=outputs, hash_max_bytes=hash_max_bytes, timestamp=timestamp)
+            outputs=outputs, out_dir=out, hash_max_bytes=hash_max_bytes,
+            timestamp=timestamp)
         provenance.write_manifest(manifest, out / "manifest.json")
         outputs.append(str(out / "manifest.json"))
+        # verifiable results folder: `sha256sum -c checksums.sha256`
+        provenance.write_checksums(outputs, out / "checksums.sha256", base=out)
+        outputs.append(str(out / "checksums.sha256"))
 
     if verbose:
         _print_report(res, qc)

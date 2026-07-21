@@ -24,21 +24,118 @@ from .config import AcquisitionConfig
 # Packages whose versions materially affect the numbers; recorded in every run.
 _TRACKED_PACKAGES = (
     "pilitrack", "numpy", "scipy", "scikit-image", "pandas",
-    "nd2", "tifffile", "aicsimageio", "czifile",
+    "scikit-learn", "joblib",                       # ML detector
+    "nd2", "tifffile", "aicsimageio", "czifile",    # readers
+    "matplotlib", "ruptures",                       # figures / phase segmentation
+    "cellpose", "napari", "streamlit",              # optional backends / apps
 )
 
 
+def _git_commit() -> str | None:
+    """Best-effort short git commit of the pilitrack source (``None`` for a plain
+    pip install that isn't a git checkout). Appends ``-dirty`` if the working
+    tree has uncommitted changes, so a manifest never claims a clean commit for
+    edited code."""
+    import subprocess
+    pkg_dir = str(Path(__file__).resolve().parent)
+    try:
+        r = subprocess.run(["git", "-C", pkg_dir, "rev-parse", "--short", "HEAD"],
+                           capture_output=True, text=True, timeout=5)
+        sha = r.stdout.strip()
+        if r.returncode != 0 or not sha:
+            return None
+        dirty = subprocess.run(["git", "-C", pkg_dir, "status", "--porcelain"],
+                               capture_output=True, text=True, timeout=5).stdout.strip()
+        return sha + ("-dirty" if dirty else "")
+    except Exception:  # pragma: no cover - git absent / not a checkout
+        return None
+
+
 def software_versions() -> dict:
-    """Version of Python and every dependency that can change the results."""
+    """Version of Python and every dependency that can change the results, plus
+    the pilitrack git commit when running from a checkout."""
     from importlib.metadata import PackageNotFoundError, version
 
-    out = {"python": platform.python_version(), "platform": platform.platform()}
+    out = {"python": platform.python_version(), "platform": platform.platform(),
+           "git_commit": _git_commit()}
     for pkg in _TRACKED_PACKAGES:
         try:
             out[pkg] = version(pkg)
         except PackageNotFoundError:
             out[pkg] = None
     return out
+
+
+def deterministic_state(seed=None) -> dict:
+    """Record the determinism-relevant environment (RNG seed, native thread caps,
+    loaded BLAS/OpenMP pools) for the manifest, so a run's numerical environment
+    is auditable and reproducible."""
+    import os
+    state = {
+        "seed": seed,
+        "thread_env": {v: os.environ.get(v) for v in (
+            "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
+            "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS", "PYTHONHASHSEED")},
+    }
+    try:
+        import threadpoolctl
+        state["threadpools"] = [
+            {k: info.get(k) for k in ("user_api", "internal_api", "num_threads")}
+            for info in threadpoolctl.threadpool_info()]
+    except Exception:
+        state["threadpools"] = None
+    return state
+
+
+def set_deterministic(seed: int = 0) -> dict:
+    """Best-effort deterministic mode: seed numpy + stdlib RNGs and cap native
+    thread pools to 1. Native-thread caps are only *fully* effective when set
+    before numpy/BLAS import, so call this as early as possible (or export the
+    env vars before launch); returns the recorded state for the manifest."""
+    import os
+    import random
+    import numpy as np
+    for var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
+                "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
+        os.environ.setdefault(var, "1")
+    np.random.seed(seed)
+    random.seed(seed)
+    return deterministic_state(seed=seed)
+
+
+def fingerprint_outputs(paths, *, base=None) -> list[dict]:
+    """``{path, size_bytes, sha256}`` for each existing output file. No mtime, so
+    two runs on the same input produce identical fingerprints. ``base`` makes the
+    recorded paths relative (to the results folder)."""
+    base = Path(base) if base else None
+    out = []
+    for p in paths:
+        p = Path(p)
+        if not (p.exists() and p.is_file()):
+            continue
+        h = hashlib.sha256()
+        with open(p, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+        try:
+            rel = str(p.relative_to(base)) if base else p.name
+        except ValueError:
+            rel = p.name
+        out.append({"path": rel.replace("\\", "/"),
+                    "size_bytes": p.stat().st_size, "sha256": h.hexdigest()})
+    return out
+
+
+def write_checksums(paths, out_path, *, base=None) -> str:
+    """Write a ``sha256sum -c``-compatible checksums file for the outputs, so a
+    collaborator can verify a shared results folder with one command."""
+    out_path = Path(out_path)
+    base = Path(base) if base else out_path.parent
+    lines = [f"{fp['sha256']}  {fp['path']}"
+             for fp in fingerprint_outputs(paths, base=base)]
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text("\n".join(lines) + ("\n" if lines else ""))
+    return str(out_path)
 
 
 def file_fingerprint(path, *, algo: str = "sha256", max_bytes: int | None = None) -> dict:
@@ -137,23 +234,33 @@ def build_manifest(
     results_summary: dict | None = None,
     qc: dict | None = None,
     outputs: list | None = None,
+    out_dir=None,
     hash_max_bytes: int | None = None,
     timestamp: str | None = None,
+    determinism: dict | None = None,
     extra: dict | None = None,
 ) -> dict:
     """Assemble the full provenance record for one analysis run.
 
     ``timestamp`` may be supplied (UTC ISO string); otherwise it is stamped now.
-    ``hash_max_bytes`` limits the input hash for speed on huge movies.
+    ``hash_max_bytes`` limits the input hash for speed on huge movies. Any
+    ``outputs`` that already exist are content-hashed (``output_checksums``) so
+    the record covers both halves of the chain — inputs *and* results.
     """
     if timestamp is None:
         timestamp = datetime.now(timezone.utc).isoformat()
+    checksums = None
+    if outputs:
+        existing = [o for o in outputs if Path(o).exists()]
+        if existing:
+            checksums = fingerprint_outputs(existing, base=out_dir)
     return {
         "tool": "pilitrack",
         "created_utc": timestamp,
         "input": file_fingerprint(input_path, max_bytes=hash_max_bytes)
         if input_path not in (None, "<array>") else {"path": str(input_path)},
         "software": software_versions(),
+        "determinism": determinism if determinism is not None else deterministic_state(),
         "acquisition_config": config_to_dict(cfg),
         "detection_params": detection or {},
         "selection": {"roi": list(roi) if roi else None,
@@ -163,6 +270,7 @@ def build_manifest(
         "results_summary": _json_safe(results_summary) if results_summary else None,
         "qc": _json_safe(qc) if qc else None,
         "outputs": list(outputs) if outputs else [],
+        "output_checksums": checksums,
         "extra": extra or {},
     }
 
