@@ -20,6 +20,13 @@ class AcquisitionConfig:
     # --- pilus detection ---
     ridge_sigmas: tuple = (1.0, 1.5, 2.0)   # scales for the tubeness filter (px)
     detect_threshold: float = 0.20    # relative threshold on the ridge response
+    hysteresis_low_frac: float = 1.0  # double-threshold detection: keep ridge
+                                      # pixels down to frac*detect_threshold when
+                                      # connected to a strong core, recovering
+                                      # faint distal ends. Opt-in (set e.g. 0.5)
+                                      # for faint-pilus data; 1.0 = single cut,
+                                      # the safe default (won't merge pili into
+                                      # nearby cell-edge ridge on artifact frames)
     pilus_prob_threshold: float = 0.50   # threshold on an ilastik probability map
     pilus_prob_channel: int = 1          # which class channel is "pilus"
     omnipose_model: str = "bact_phase_omni"  # bacterial phase-contrast model

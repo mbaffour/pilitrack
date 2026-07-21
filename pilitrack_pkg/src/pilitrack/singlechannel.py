@@ -26,7 +26,7 @@ from skimage.filters import sato, threshold_otsu
 from skimage.measure import label
 from skimage.morphology import disk, opening, skeletonize, white_tophat
 
-from .detect import _drop_small
+from .detect import _drop_small, hysteresis_mask
 
 
 def _otsu_mask(work, open_radius_px: float) -> np.ndarray:
@@ -187,7 +187,7 @@ def make_pili_detector(
             return np.zeros(img.shape, dtype=bool)
 
         ridge = np.clip(ridge / hi, 0.0, 1.0)
-        mask = ridge > cfg.detect_threshold
+        mask = hysteresis_mask(ridge, cfg)
         mask = _drop_small(mask, 3)
         return skeletonize(mask)
 

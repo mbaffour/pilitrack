@@ -303,6 +303,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--min-length", type=float, default=None, dest="min_pilus_length_nm")
     # detection
     p.add_argument("--detect-threshold", type=float, default=None)
+    p.add_argument("--hysteresis-low-frac", type=float, default=None,
+                   dest="hysteresis_low_frac",
+                   help="recover faint pili: keep ridge down to FRAC*threshold "
+                        "when connected to a bright core (e.g. 0.5; 1.0=off)")
     p.add_argument("--tophat", type=float, default=None, dest="tophat_radius_px")
     p.add_argument("--open-radius", type=float, default=None, dest="open_radius_px")
     p.add_argument("--min-cell-area", type=int, default=None, dest="min_cell_area_px")
@@ -328,7 +332,8 @@ def resolve_model_arg(model):
 
 def _overrides_from_args(args) -> dict:
     keys = ("dt_s", "pixel_size_nm", "min_pilus_length_nm", "detect_threshold",
-            "tophat_radius_px", "open_radius_px", "min_cell_area_px")
+            "hysteresis_low_frac", "tophat_radius_px", "open_radius_px",
+            "min_cell_area_px")
     ov = {k: getattr(args, k) for k in keys if getattr(args, k, None) is not None}
     if args.detect_threshold is None and args.config is None:
         ov["detect_threshold"] = DEFAULT_DETECT_THRESHOLD

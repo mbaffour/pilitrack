@@ -30,8 +30,11 @@ accurate pili numbers). Items are checked off as they land.
 - [x] **#1 events.csv** — per-event extend/pause/retract phases (kind, dwell,
   velocity, Δlength) surfaced from `kinetics`; written by `analyze`/`batch` and
   shown + downloadable in the browser Data tab. `analyze.phase_table()`.
-- [ ] **#2 Hysteresis (double-threshold) detection** — recover faint distal ends
-  / blinking pili via `skimage.filters.apply_hysteresis_threshold`.
+- [x] **#2 Hysteresis (double-threshold) detection** — `detect.hysteresis_mask`
+  recovers faint distal ends via `apply_hysteresis_threshold`. Shipped **opt-in**
+  (`hysteresis_low_frac`, default off + browser toggle + `--hysteresis-low-frac`)
+  because default-on can merge a pilus into cell-edge glow on artifact frames.
+  Follow-up: salvage the longest through-path from a dropped blob so it's safe-on.
 - [ ] **#3 ruptures PELT phase segmentation** — principled extend/pause/retract
   boundaries instead of one velocity threshold (optional `[stats]` extra).
 - [ ] **#4 Orientation + length-continuity linking cost** — keep pilus identity

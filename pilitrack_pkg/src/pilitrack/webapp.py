@@ -27,7 +27,8 @@ DEFAULT_MOVIE = str(Path(__file__).resolve().parents[3] / "Labelled data" / "tri
 
 def analyze_for_web(path, *, detect_threshold=None, fast=True, frames=None,
                     roi=None, pili_channel=None, cell_channel=None,
-                    model=None, downsample=1, organism=None) -> dict:
+                    model=None, downsample=1, organism=None,
+                    hysteresis_low_frac=None) -> dict:
     """Load + analyze a movie for the web UI. Returns everything the page renders
     (fluor stack, cfg, detect_and_link art, summary, qc, meta). ``model`` (a
     trained detector or path) replaces the ridge filter when given.
@@ -65,6 +66,8 @@ def analyze_for_web(path, *, detect_threshold=None, fast=True, frames=None,
     meta["roi"] = roi                       # (y0, y1, x0, x1) in full px, or None
     meta["downsample"] = d
     overrides = {"detect_threshold": detect_threshold or DEFAULT_DETECT_THRESHOLD}
+    if hysteresis_low_frac is not None and hysteresis_low_frac < 1.0:
+        overrides["hysteresis_low_frac"] = float(hysteresis_low_frac)
     cfg, detection = build_config(meta, overrides=overrides)
     seg, det = _backends(meta["single_channel"], detection)
     prob = None
@@ -234,6 +237,10 @@ def main():
                  "to avoid false flags.")
         thr = st.slider("Detection threshold", 0.15, 0.60, 0.30, 0.05,
                         help="Higher = stricter (less noise, may miss faint pili)")
+        faint = st.checkbox("Recover faint pili (hysteresis)", value=False,
+                            help="Double-threshold: keep faint distal ends that "
+                                 "connect to a bright core. Helps low-SNR data; may "
+                                 "merge a pilus into nearby cell-edge glow.")
         fast = st.checkbox("Fast preview (center crop + first frames)", value=True,
                           help="Uncheck for the whole movie — slower and heavier")
         ds = st.select_slider("Downsample (for big/whole-field views)",
@@ -280,7 +287,8 @@ def main():
             try:
                 st.session_state["res"] = analyze_for_web(
                     src, detect_threshold=thr, fast=fast, model=model,
-                    downsample=ds, organism=organism)
+                    downsample=ds, organism=organism,
+                    hysteresis_low_frac=(0.5 if faint else None))
                 # a fresh analysis -> drop hand traces tied to the previous movie
                 # so they can't leak into (and corrupt) this movie's labels
                 for k in ("manual_pili", "wip_points", "_last_click"):

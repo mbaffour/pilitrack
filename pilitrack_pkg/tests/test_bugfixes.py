@@ -235,3 +235,21 @@ def test_phase_table_surfaces_extend_dwell_retract_events():
     # an extension event has positive velocity and positive length change
     ext = df[df["kind"] == "extension"].iloc[0]
     assert ext["velocity_nm_s"] > 0 and ext["delta_length_nm"] > 0
+
+
+def test_hysteresis_mask_recovers_faint_tail_but_not_noise():
+    """Opt-in double-threshold keeps a faint tail connected to a bright core,
+    rejects isolated faint noise, and matches a single cut when disabled."""
+    from pilitrack.detect import hysteresis_mask
+    resp = np.zeros((5, 12))
+    resp[2, 0:4] = 0.9          # bright core (> high=0.3)
+    resp[2, 4:9] = 0.22         # faint tail (between low=0.15 and high=0.3)
+    on = AcquisitionConfig(dt_s=0.4, pixel_size_nm=65.0,
+                           detect_threshold=0.30, hysteresis_low_frac=0.5)
+    off = AcquisitionConfig(dt_s=0.4, pixel_size_nm=65.0,
+                            detect_threshold=0.30, hysteresis_low_frac=1.0)
+    assert hysteresis_mask(resp, on).sum() == 9      # core(4) + connected tail(5)
+    assert hysteresis_mask(resp, off).sum() == 4     # core only
+    noise = np.zeros((5, 12))
+    noise[1, 1] = noise[3, 8] = 0.22                 # faint, no bright core
+    assert hysteresis_mask(noise, on).sum() == 0

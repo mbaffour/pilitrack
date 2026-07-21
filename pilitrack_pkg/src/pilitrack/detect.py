@@ -70,9 +70,26 @@ def detect_pili(fluor_frame: np.ndarray, cfg: AcquisitionConfig) -> np.ndarray:
     if hi <= 0:
         hi = float(ridge.max())
     ridge = np.clip(ridge / hi, 0, 1)
-    mask = ridge > cfg.detect_threshold
+    mask = hysteresis_mask(ridge, cfg)
     mask = _drop_small(mask, 3)
     return skeletonize(mask)
+
+
+def hysteresis_mask(norm_ridge: np.ndarray, cfg: AcquisitionConfig) -> np.ndarray:
+    """Double-threshold (hysteresis) mask on a [0,1]-normalized ridge response.
+
+    Keeps pixels above the low threshold that are connected to a *core* above
+    ``detect_threshold`` — recovering the faint distal end of a pilus (which
+    tapers below a single hard cut) and bridging momentary dropouts, without
+    lowering the global noise floor (isolated faint pixels are not kept).
+    Degenerates to a single threshold when ``hysteresis_low_frac`` is >=1 or <=0.
+    """
+    high = float(cfg.detect_threshold)
+    frac = float(getattr(cfg, "hysteresis_low_frac", 1.0))
+    if not (0.0 < frac < 1.0):
+        return norm_ridge > high
+    from skimage.filters import apply_hysteresis_threshold
+    return apply_hysteresis_threshold(norm_ridge, high * frac, high)
 
 
 def filament_components(skeleton: np.ndarray) -> tuple[np.ndarray, int]:
