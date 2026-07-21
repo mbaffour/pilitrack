@@ -40,6 +40,13 @@ class AcquisitionConfig:
     max_gap_frames: int = 1           # bridge this many missed frames
     min_piliation_frames: int = 3     # a cell must show a pilus this many frames
     linker: str = "greedy"            # "greedy" or "lap" (optimal Hungarian)
+    # Continuity terms added to the base-distance assignment cost so a pilus keeps
+    # its identity through a crossing: a candidate emerging at a very different
+    # angle, or whose length jumped faster than physically possible, is penalized.
+    # Both only re-rank matches already allowed by max_base_jump_px (0 disables).
+    link_orientation_weight_px: float = 2.0   # cost of a full direction reversal/2
+    link_length_weight: float = 1.0           # cost per px of impossible dL
+    max_velocity_nm_s: float = 2000.0  # above published T4P retraction (~0.6-2 um/s)
 
     # --- kinetics segmentation ---
     smoothing_window: int = 3         # median window on length(t) before slopes

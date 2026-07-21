@@ -37,8 +37,10 @@ accurate pili numbers). Items are checked off as they land.
   Follow-up: salvage the longest through-path from a dropped blob so it's safe-on.
 - [ ] **#3 ruptures PELT phase segmentation** — principled extend/pause/retract
   boundaries instead of one velocity threshold (optional `[stats]` extra).
-- [ ] **#4 Orientation + length-continuity linking cost** — keep pilus identity
-  through crossings.
+- [x] **#4 Orientation + length-continuity linking cost** — `track._match_cost`
+  adds an emergence-angle continuity term and a physically-impossible-Δlength
+  penalty to the base-distance cost, used by **both** the greedy and LAP linkers,
+  so a pilus keeps its identity where two cross (base distance alone swaps them).
 - [ ] **#6 SuperPlots** — honest per-cell hierarchical figure over existing stats.
 - [ ] **#9 Downcast label images** to a minimal int dtype (memory).
 - [ ] **#10 Progress bars + per-frame error isolation + memory preflight.**

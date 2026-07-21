@@ -253,3 +253,28 @@ def test_hysteresis_mask_recovers_faint_tail_but_not_noise():
     noise = np.zeros((5, 12))
     noise[1, 1] = noise[3, 8] = 0.22                 # faint, no bright core
     assert hysteresis_mask(noise, on).sum() == 0
+
+
+def test_orientation_continuity_keeps_identity_through_a_crossing():
+    """Where two pili cross, base distance alone can prefer the SWAP; the
+    orientation-continuity term must keep each pilus with its own track."""
+    from pilitrack.track import link_tracks
+    from pilitrack.measure import Filament
+
+    def fil(base, tip, L, cid=1):
+        f = Filament(1, L, base, tip, np.array([base, tip]))
+        f.cell_id, f.track_id = cid, None
+        return f
+
+    def frames():                      # fresh filaments (track_id must be unset)
+        return [[fil((50, 50), (50, 60), 10.0), fil((50, 52), (50, 42), 10.0)],
+                [fil((50, 51.5), (50, 61), 10.0), fil((50, 50.5), (50, 40), 10.0)]]
+
+    def tip_dirs(weight):
+        cfg = AcquisitionConfig(dt_s=0.4, pixel_size_nm=65.0, max_base_jump_px=5.0,
+                                link_orientation_weight_px=weight, linker="lap")
+        trs = [t for t in link_tracks(frames(), cfg) if len(t.tips) > 1]
+        return [{"+x" if tp[1] > 50.8 else "-x" for tp in tr.tips} for tr in trs]
+
+    assert any(len(d) > 1 for d in tip_dirs(0.0))       # base-only: identities swap
+    assert all(len(d) == 1 for d in tip_dirs(2.0))      # with continuity: kept
