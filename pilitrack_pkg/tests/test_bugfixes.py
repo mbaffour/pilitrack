@@ -278,3 +278,17 @@ def test_orientation_continuity_keeps_identity_through_a_crossing():
 
     assert any(len(d) > 1 for d in tip_dirs(0.0))       # base-only: identities swap
     assert all(len(d) == 1 for d in tip_dirs(2.0))      # with continuity: kept
+
+
+def test_compact_labels_downcasts_losslessly():
+    """Per-frame label images must use the smallest lossless dtype — int64 labels
+    for a 2k x 2k x 70 movie cost ~2 GB on their own."""
+    from pilitrack.pipeline import _compact_labels
+    for mx, want in ((3, np.uint8), (300, np.uint16), (70000, np.uint32)):
+        a = np.zeros((4, 4), np.int64)
+        a[0, 0] = mx
+        out = _compact_labels(a)
+        assert out.dtype == want
+        assert int(out.max()) == mx            # lossless
+    assert _compact_labels(np.zeros((2, 2), bool)).dtype == bool
+    assert _compact_labels(np.array([[-1, 2]])).dtype == np.int64   # left alone

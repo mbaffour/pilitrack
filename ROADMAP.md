@@ -42,7 +42,9 @@ accurate pili numbers). Items are checked off as they land.
   penalty to the base-distance cost, used by **both** the greedy and LAP linkers,
   so a pilus keeps its identity where two cross (base distance alone swaps them).
 - [ ] **#6 SuperPlots** — honest per-cell hierarchical figure over existing stats.
-- [ ] **#9 Downcast label images** to a minimal int dtype (memory).
+- [x] **#9 Downcast label images** to a minimal int dtype — `pipeline._compact_labels`
+  picks the smallest lossless uint (8x smaller: 2.13 GB -> 0.27 GB for a
+  1952x1952 x 70 label stack).
 - [ ] **#10 Progress bars + per-frame error isolation + memory preflight.**
 
 ## Later (higher effort)

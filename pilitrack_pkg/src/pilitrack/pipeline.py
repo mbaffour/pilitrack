@@ -23,6 +23,27 @@ from .track import link_tracks
 from .kinetics import summarize_pilus
 
 
+def _compact_labels(lbl) -> np.ndarray:
+    """Downcast a cell-label image to the smallest integer dtype that holds it.
+
+    ``skimage.measure.label`` (and a plain ``.astype(int)``) give int32/int64, so
+    the per-frame label images of a 1952x1952 x 70-frame movie cost ~2 GB on
+    their own. Cell counts are small, so uint8/uint16 is lossless and 4-8x
+    smaller — the difference between a movie that fits in RAM and one that does
+    not. Non-integer input is rounded; anything with negative labels is left
+    alone."""
+    a = np.asarray(lbl)
+    if a.dtype == bool or a.size == 0:
+        return a
+    if not np.issubdtype(a.dtype, np.integer):
+        a = np.rint(a).astype(np.int64)
+    if int(a.min()) < 0:
+        return a
+    mx = int(a.max())
+    dtype = np.uint8 if mx <= 255 else (np.uint16 if mx <= 65535 else np.uint32)
+    return a.astype(dtype, copy=False)
+
+
 def detect_and_link(
     fluor_stack: np.ndarray,
     cell_stack: np.ndarray,
@@ -44,7 +65,7 @@ def detect_and_link(
 
     def _cells(t):
         if cell_label_stack is not None:
-            return cell_label_stack[t].astype(int)
+            return cell_label_stack[t]
         if segment_fn is not None:
             return segment_fn(cell_stack[t], cfg)
         return segment_cells(cell_stack[t], cfg)
@@ -59,7 +80,7 @@ def detect_and_link(
     per_frame_filaments = []
     per_frame_cell_labels = []
     for t in range(T):
-        cells = _cells(t)
+        cells = _compact_labels(_cells(t))
         skel = _skel(t)
         fils = extract_filaments(skel, cfg)
         fils = associate_to_cells(fils, cells, cfg)
