@@ -18,7 +18,7 @@ import numpy as np
 # absolute imports so `streamlit run webapp.py` (no package context) also works
 from pilitrack.io import load_movie, config_from_meta
 from pilitrack.analyze import (build_config, _backends, DEFAULT_DETECT_THRESHOLD,
-                               pilus_length_timeseries)
+                               pilus_length_timeseries, phase_table)
 from pilitrack.pipeline import detect_and_link, summarize
 from pilitrack.qc import qc_metrics
 
@@ -441,15 +441,21 @@ def main():
             st.info(f"Figures need matplotlib ({exc}).")
 
     with t_data:
-        st.dataframe(res["pilus"], width="stretch", height=280)
+        st.dataframe(res["pilus"], width="stretch", height=240)
         ts = pilus_length_timeseries(art["tracks"], cfg, art["n_frames"])
-        dl = st.columns(4)
+        events = phase_table(art["tracks"], cfg, art["n_frames"])
+        st.caption("**Per-event kinetics** (each extend / pause / retract phase, "
+                   "with dwell time and velocity):")
+        st.dataframe(events, width="stretch", height=200)
+        dl = st.columns(5)
         dl[0].download_button("pili.csv", res["pilus"].to_csv(index=False),
                               "pili.csv", "text/csv")
         dl[1].download_button("cells.csv", res["cell"].to_csv(index=False),
                               "cells.csv", "text/csv")
         dl[2].download_button("length_over_time.csv", ts.to_csv(index=False),
                               "pilus_length_over_time.csv", "text/csv")
+        dl[3].download_button("events.csv", events.to_csv(index=False),
+                              "events.csv", "text/csv")
         from pilitrack import provenance
         # use the path actually analyzed (from meta), NOT the live sidebar box —
         # which may have been edited since, or be empty for an uploaded file.
@@ -457,7 +463,7 @@ def main():
         man = provenance.build_manifest(input_path=analyzed_path, cfg=cfg,
                                         meta=result["meta"],
                                         results_summary=res["population"], qc=qc)
-        dl[3].download_button("manifest.json", json.dumps(man, indent=2, default=str),
+        dl[4].download_button("manifest.json", json.dumps(man, indent=2, default=str),
                               "manifest.json", "application/json")
 
 

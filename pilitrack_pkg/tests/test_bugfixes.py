@@ -208,3 +208,30 @@ def test_crossing_pili_are_split_into_two():
     rr, cc = line(5, 5, 50, 50)
     one[rr, cc] = True
     assert len(extract_filaments(skeletonize(one), cfg)) == 1
+
+
+def test_phase_table_surfaces_extend_dwell_retract_events():
+    """events.csv must contain the per-event phases (kind, dwell, velocity) for a
+    pilus that extends then retracts, consistent with the length series."""
+    from pilitrack.analyze import phase_table
+    from pilitrack.synth import make_kinetic_trace
+
+    cfg = AcquisitionConfig(dt_s=0.4, pixel_size_nm=65.0, max_pilus_length_nm=20000.0)
+    truth = make_kinetic_trace(cfg, v_ext_nm_s=500, v_ret_nm_s=500,
+                               max_length_nm=2000, n_cycles=1)
+    length_px = truth.length_nm / cfg.pixel_size_nm
+
+    class _Tr:                       # minimal track exposing length_series
+        track_id, cell_id = 7, 3
+        def length_series(self, n):
+            return length_px
+
+    df = phase_table([_Tr()], cfg, length_px.size)
+    assert set(df.columns) >= {"track_id", "cell_id", "kind", "duration_s",
+                               "velocity_nm_s", "delta_length_nm"}
+    kinds = set(df["kind"])
+    assert "extension" in kinds and "retraction" in kinds
+    assert (df["track_id"] == 7).all() and (df["cell_id"] == 3).all()
+    # an extension event has positive velocity and positive length change
+    ext = df[df["kind"] == "extension"].iloc[0]
+    assert ext["velocity_nm_s"] > 0 and ext["delta_length_nm"] > 0

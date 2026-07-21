@@ -162,8 +162,11 @@ def analyze_file(
         # length of each individual pilus over time (the kymograph, as data)
         pilus_length_timeseries(art["tracks"], cfg, art["n_frames"]).to_csv(
             out / "pilus_length_over_time.csv", index=False)
+        # per-event kinetics (extend/pause/retract phases with dwell + velocity)
+        phase_table(art["tracks"], cfg, art["n_frames"]).to_csv(
+            out / "events.csv", index=False)
         outputs += [str(out / "pili.csv"), str(out / "cells.csv"),
-                    str(out / "pilus_length_over_time.csv")]
+                    str(out / "pilus_length_over_time.csv"), str(out / "events.csv")]
         if save_overlays:
             T = art["n_frames"]
             idx = sorted(set(np.linspace(0, T - 1, max(1, qc_frames)).astype(int).tolist()))
@@ -234,6 +237,47 @@ def pilus_length_timeseries(tracks, cfg, n_frames) -> "pd.DataFrame":
                              "length_nm": round(float(L), 2)})
     return pd.DataFrame(rows, columns=["track_id", "cell_id", "frame",
                                        "time_s", "length_nm"])
+
+
+def phase_table(tracks, cfg, n_frames) -> "pd.DataFrame":
+    """One row per kinetic EVENT (extension / dwell / retraction phase) per
+    pilus: ``track_id, cell_id, kind, start/end frame & time, duration_s,
+    velocity_nm_s, delta_length_nm``.
+
+    These per-event dwell times, run lengths and velocities are the core of T4P
+    kinetics — the pipeline computes the phases on every run (kinetics) but only
+    keeps counts and means; this surfaces the full event list. Frames are the
+    same first-to-last-detection, gap-interpolated span the per-pilus summary
+    uses, so events.csv is consistent with pili.csv.
+    """
+    from .kinetics import segment_trace
+
+    rows = []
+    for tr in tracks:
+        series_nm = tr.length_series(n_frames) * cfg.pixel_size_nm
+        finite = np.where(~np.isnan(series_nm))[0]
+        if finite.size < 2:
+            continue
+        f0, f1 = int(finite[0]), int(finite[-1])
+        span = series_nm[f0:f1 + 1].astype(float)
+        gap = np.isnan(span)
+        if gap.any() and (~gap).sum() >= 2:
+            idx = np.arange(span.size)
+            span[gap] = np.interp(idx[gap], idx[~gap], span[~gap])
+        for p in segment_trace(span, cfg):
+            a, b = f0 + p.start_frame, f0 + p.end_frame
+            dL = float(span[p.end_frame] - span[p.start_frame])
+            rows.append({
+                "track_id": tr.track_id, "cell_id": tr.cell_id, "kind": p.kind,
+                "start_frame": int(a), "end_frame": int(b),
+                "start_s": round(a * cfg.dt_s, 4), "end_s": round(b * cfg.dt_s, 4),
+                "duration_s": round((p.end_frame - p.start_frame + 1) * cfg.dt_s, 4),
+                "velocity_nm_s": round(float(p.velocity_nm_s), 2),
+                "delta_length_nm": round(dL, 2),
+            })
+    return pd.DataFrame(rows, columns=[
+        "track_id", "cell_id", "kind", "start_frame", "end_frame",
+        "start_s", "end_s", "duration_s", "velocity_nm_s", "delta_length_nm"])
 
 
 # --------------------------------------------------------------------------- #

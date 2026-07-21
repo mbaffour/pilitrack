@@ -27,8 +27,9 @@ accurate pili numbers). Items are checked off as they land.
   readout, sub-pixel length — landed earlier this cycle.
 
 ## Next (high value / low effort)
-- [ ] **#1 events.csv** — export the extend/pause/retract phases already computed
-  in `kinetics` (dwell time, per-event velocity, run length, processivity).
+- [x] **#1 events.csv** — per-event extend/pause/retract phases (kind, dwell,
+  velocity, Δlength) surfaced from `kinetics`; written by `analyze`/`batch` and
+  shown + downloadable in the browser Data tab. `analyze.phase_table()`.
 - [ ] **#2 Hysteresis (double-threshold) detection** — recover faint distal ends
   / blinking pili via `skimage.filters.apply_hysteresis_threshold`.
 - [ ] **#3 ruptures PELT phase segmentation** — principled extend/pause/retract
